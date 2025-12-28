@@ -3,9 +3,9 @@
     <van-sticky>
       <van-search v-model="searchText" placeholder="搜索汉字或拼音" />
       <van-tabs v-model:active="activeTab">
-        <van-tab title="全部" name="all"></van-tab>
-        <van-tab title="已收集" name="collected"></van-tab>
-        <van-tab title="未收集" name="uncollected"></van-tab>
+        <van-tab :title="`全部 (${totalCount})`" name="all"></van-tab>
+        <van-tab :title="`已收集 (${collectedCount})`" name="collected"></van-tab>
+        <van-tab :title="`未收集 (${uncollectedCount})`" name="uncollected"></van-tab>
       </van-tabs>
     </van-sticky>
 
@@ -35,7 +35,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { gb2312Level1Chars, getPinyin, getGB2312Code, getStrokes, getRadical } from '@/data/gb2312-generator'
+import { gb2312Level1Chars, getPinyin, getGB2312Code, getStrokes, getRadical, punctuationChars } from '@/data/gb2312-generator'
 import { getCollectedSamplesMap } from '@/services/db'
 import CharacterCard from '@/components/CharacterCard.vue'
 import type { CharacterInfo, CharacterSample } from '@/types'
@@ -54,11 +54,15 @@ const allChars = computed(() => {
   return gb2312Level1Chars.map(char => ({
     char,
     code: getGB2312Code(char),
-    pinyin: getPinyin(char),
-    radical: getRadical(char),
-    strokes: getStrokes(char)
+    pinyin: punctuationChars.includes(char) ? '标点' : getPinyin(char),
+    radical: punctuationChars.includes(char) ? '' : getRadical(char),
+    strokes: punctuationChars.includes(char) ? 0 : getStrokes(char)
   }))
 })
+
+const totalCount = computed(() => allChars.value.length)
+const collectedCount = computed(() => allChars.value.filter(c => collectedMap.value[c.char]).length)
+const uncollectedCount = computed(() => totalCount.value - collectedCount.value)
 
 onMounted(async () => {
   collectedMap.value = await getCollectedSamplesMap()

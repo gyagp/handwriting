@@ -4,9 +4,46 @@ import { VitePWA } from 'vite-plugin-pwa'
 import Components from 'unplugin-vue-components/vite'
 import { VantResolver } from '@vant/auto-import-resolver'
 import { resolve } from 'path'
+import fs from 'fs'
 
 export default defineConfig({
   plugins: [
+    {
+      name: 'api-middleware',
+      configureServer(server) {
+        server.middlewares.use('/api/data', (req, res, next) => {
+          const dataPath = resolve(__dirname, 'data.json')
+          
+          if (req.method === 'GET') {
+            if (fs.existsSync(dataPath)) {
+              const data = fs.readFileSync(dataPath, 'utf-8')
+              res.setHeader('Content-Type', 'application/json')
+              res.end(data)
+            } else {
+              res.end(JSON.stringify({ samples: [], works: [], settings: null }))
+            }
+          } else if (req.method === 'POST') {
+            let body = ''
+            req.on('data', chunk => {
+              body += chunk.toString()
+            })
+            req.on('end', () => {
+              try {
+                // 验证JSON格式
+                JSON.parse(body)
+                fs.writeFileSync(dataPath, body)
+                res.end('ok')
+              } catch (e) {
+                res.statusCode = 500
+                res.end('error')
+              }
+            })
+          } else {
+            next()
+          }
+        })
+      }
+    },
     vue(),
     Components({
       resolvers: [VantResolver()]

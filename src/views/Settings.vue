@@ -27,7 +27,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
-import { getSettings, saveSettings, db } from '@/services/db'
+import { getSettings, saveSettings, db, syncToFile } from '@/services/db'
 import type { AppSettings } from '@/types'
 import { showDialog, showToast } from 'vant'
 
@@ -60,6 +60,8 @@ const clearData = () => {
     if (action === 'confirm') {
       await db.samples.clear()
       await db.characters.clear()
+      await db.works.clear()
+      await syncToFile()
       showToast('数据已清除')
     }
   })

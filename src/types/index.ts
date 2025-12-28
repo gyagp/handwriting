@@ -27,7 +27,7 @@ export interface CharacterCollection {
 }
 
 // 格子类型
-export type GridType = 'mi' | 'tian' | 'hui'
+export type GridType = 'mi' | 'tian' | 'hui' | 'none'
 
 // 图像处理结果 - 单个字符
 export interface ExtractedCharacter {
@@ -59,7 +59,9 @@ export interface Work {
   author?: string           // 作者
   content: string           // 作品内容
   charStyles: Record<number, string> // 字符索引 -> sampleId (指定每个位置使用哪个样本)
+  charAdjustments?: Record<number, { scale: number, offsetX: number, offsetY: number }> // 字符索引 -> 调整参数
   layout: 'horizontal' | 'vertical' // 排版方向
+  gridType?: GridType       // 格子类型
   createdAt: number
   updatedAt: number
 }

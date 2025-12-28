@@ -5,13 +5,14 @@
     </div>
     <div class="card-body">
       <GridDisplay
+        v-if="!sample"
         :type="gridType"
         :size="60"
         :content="info.char"
         class="kaiti-char"
       />
       <GridDisplay
-        v-if="sample"
+        v-else
         :type="gridType"
         :size="60"
         :content="sample"
@@ -26,7 +27,7 @@
 </template>
 
 <script setup lang="ts">
-import type { CharacterInfo } from '@/types'
+import type { CharacterInfo, GridType } from '@/types'
 import GridDisplay from './GridDisplay.vue'
 
 const props = defineProps<{
@@ -34,11 +35,10 @@ const props = defineProps<{
   collected?: boolean
   sample?: string // 收集到的样本缩略图或SVG路径
   sampleViewBox?: string
+  gridType?: GridType
 }>()
 
 defineEmits(['click'])
-
-const gridType = 'mi' // 默认米字格
 </script>
 
 <style scoped>

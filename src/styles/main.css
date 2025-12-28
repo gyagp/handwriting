@@ -105,6 +105,13 @@ html, body {
   border: 1px solid var(--grid-color-light);
 }
 
+/* 无格子样式 */
+.grid-none {
+  position: relative;
+  background-color: transparent;
+  border: none;
+}
+
 /* 通用工具类 */
 .container {
   max-width: 100%;

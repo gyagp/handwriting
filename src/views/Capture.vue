@@ -43,23 +43,27 @@
 
     <!-- 步骤3: 确认与编辑 -->
     <div v-else-if="step === 3" class="saving-step">
-      <div class="toolbar">
-        <van-button size="small" @click="step = 2">返回</van-button>
-        <span>确认信息</span>
-        <van-button type="primary" size="small" @click="confirmSave" :loading="saving">
-          完成
-        </van-button>
-      </div>
+      <van-sticky>
+        <div class="sticky-header">
+          <div class="toolbar">
+            <van-button size="small" @click="step = 2">返回</van-button>
+            <span>确认信息</span>
+            <van-button type="primary" size="small" @click="confirmSave" :loading="saving">
+              完成
+            </van-button>
+          </div>
 
-      <div class="batch-input card" style="margin-bottom: 16px;">
-        <van-field
-          v-model="batchText"
-          label="批量填字"
-          placeholder="按顺序输入汉字，自动填充下方"
-          @update:model-value="handleBatchInput"
-        />
-        <div style="font-size: 12px; color: #999; padding: 0 16px 8px;">提示：识别出的字符顺序可能需要核对</div>
-      </div>
+          <div class="batch-input card">
+            <van-field
+              v-model="batchText"
+              label="批量填字"
+              placeholder="按顺序输入汉字，自动填充下方"
+              @update:model-value="handleBatchInput"
+            />
+            <div style="font-size: 12px; color: #999; padding: 0 16px 8px;">提示：识别出的字符顺序可能需要核对</div>
+          </div>
+        </div>
+      </van-sticky>
 
       <div class="edit-list">
         <div v-for="(item, index) in selectedItems" :key="item.id" class="edit-item card">
@@ -308,5 +312,16 @@ const confirmSave = async () => {
   align-items: center;
   justify-content: center;
   height: 100%;
+}
+
+.sticky-header {
+  background-color: var(--bg-color);
+  padding-bottom: 8px;
+  /* 稍微增加一点上边距，避免紧贴顶部 */
+  padding-top: 8px;
+}
+
+.sticky-header .batch-input {
+  margin-bottom: 0; /* 覆盖原来的 margin-bottom */
 }
 </style>

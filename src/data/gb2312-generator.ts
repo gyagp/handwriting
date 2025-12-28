@@ -94,7 +94,12 @@ export function getGB2312Code(char: string): string {
   }
 }
 
+// 常用标点符号
+export const punctuationChars = [
+  '，', '。', '、', '；', '：', '？', '！', '“', '”', '‘', '’', '（', '）', '【', '】', '《', '》', '—', '…', '·'
+]
+
 // 默认导出生成的字符列表
-export const gb2312Level1Chars = generateGB2312Level1Chars()
+export const gb2312Level1Chars = [...punctuationChars, ...generateGB2312Level1Chars()]
 
 export default gb2312Level1Chars

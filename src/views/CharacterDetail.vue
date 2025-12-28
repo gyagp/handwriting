@@ -14,6 +14,9 @@
         :content="currentSample?.svgPath || char"
         :viewBox="currentSample?.svgViewBox"
       />
+      <div class="actions" v-if="currentSample">
+        <van-button size="small" icon="edit" @click="openEdit">调整</van-button>
+      </div>
     </div>
 
     <div class="info-section card">
@@ -50,16 +53,27 @@
         </div>
       </div>
     </div>
+
+    <!-- 编辑弹窗 -->
+    <CharacterAdjustmentDialog
+      v-model:show="showEdit"
+      :content="currentSample?.svgPath || ''"
+      :grid-type="settings.gridType"
+      :initial-data="editForm"
+      @save="saveEdit"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { getSamplesByChar, deleteSample, getSettings } from '@/services/db'
+import { getSamplesByChar, deleteSample, getSettings, saveSample } from '@/services/db'
 import { gb2312Level1Chars, getPinyin, getRadical, getStrokes, getGB2312Code } from '@/data/gb2312-generator'
 import GridDisplay from '@/components/GridDisplay.vue'
+import CharacterAdjustmentDialog from '@/components/CharacterAdjustmentDialog.vue'
 import type { CharacterSample, AppSettings } from '@/types'
 import { showDialog, showToast } from 'vant'
+import { toRaw } from 'vue'
 
 const props = defineProps<{
   char: string
@@ -74,6 +88,58 @@ const settings = ref<AppSettings>({
   compressionLevel: 5,
   theme: 'light'
 })
+
+const showEdit = ref(false)
+const editForm = ref({
+  scale: 1.0,
+  offsetX: 0,
+  offsetY: 0
+})
+
+const openEdit = () => {
+  if (!currentSample.value) return
+
+  const viewBox = currentSample.value.svgViewBox || '0 0 100 100'
+  const [minX, minY, width, height] = viewBox.split(' ').map(Number)
+
+  // 反向计算
+  const scale = 100 / width
+  const offsetX = 50 - width / 2 - minX
+  const offsetY = 50 - height / 2 - minY
+
+  editForm.value = {
+    scale: Number(scale.toFixed(2)),
+    offsetX: Number(offsetX.toFixed(2)),
+    offsetY: Number(offsetY.toFixed(2))
+  }
+  showEdit.value = true
+}
+
+const saveEdit = async (data: { scale: number; offsetX: number; offsetY: number }) => {
+  if (!currentSample.value) return
+
+  const { scale, offsetX, offsetY } = data
+  const width = 100 / scale
+  const height = 100 / scale
+  const minX = 50 - offsetX - width / 2
+  const minY = 50 - offsetY - height / 2
+  const newViewBox = `${minX} ${minY} ${width} ${height}`
+
+  const updatedSample = {
+    ...toRaw(currentSample.value),
+    svgViewBox: newViewBox
+  }
+
+  await saveSample(updatedSample)
+
+  // 更新本地数据
+  const index = samples.value.findIndex(s => s.id === updatedSample.id)
+  if (index !== -1) {
+    samples.value[index] = updatedSample
+  }
+  currentSample.value = updatedSample
+  showToast('保存成功')
+}
 
 const charInfo = computed(() => {
   if (!props.char) return null
@@ -198,5 +264,11 @@ const handleDelete = (sample: CharacterSample) => {
   border-radius: 4px;
   color: #ccc;
   cursor: pointer;
+}
+
+.actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
 }
 </style>

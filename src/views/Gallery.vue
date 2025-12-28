@@ -12,9 +12,18 @@
         class="work-item card"
         @click="editWork(work)"
       >
+        <div class="work-preview-mini">
+          <GridDisplay
+            v-for="(char, idx) in getPreviewChars(work)"
+            :key="idx"
+            :size="24"
+            :content="getCharContent(work, idx, char)"
+            :viewBox="getCharViewBox(work, idx, char)"
+            :type="'none'"
+          />
+        </div>
         <div class="work-info">
           <h3>{{ work.title }} <span v-if="work.author" class="author">by {{ work.author }}</span></h3>
-          <p class="preview-text">{{ work.content }}</p>
           <span class="date">{{ new Date(work.updatedAt).toLocaleDateString() }}</span>
         </div>
         <van-icon name="arrow" color="#ccc" />
@@ -30,14 +39,18 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getWorks } from '@/services/db'
-import type { Work } from '@/types'
+import { getWorks, getCollectedSamplesMap } from '@/services/db'
+import GridDisplay from '@/components/GridDisplay.vue'
+import type { Work, CharacterSample } from '@/types'
 
 const router = useRouter()
 const works = ref<Work[]>([])
+const samplesMap = ref<Record<string, CharacterSample>>({})
 
 onMounted(async () => {
-  works.value = await getWorks()
+  const [w, s] = await Promise.all([getWorks(), getCollectedSamplesMap()])
+  works.value = w
+  samplesMap.value = s
 })
 
 const createWork = () => {
@@ -46,6 +59,32 @@ const createWork = () => {
 
 const editWork = (work: Work) => {
   router.push(`/work/${work.id}`)
+}
+
+const getPreviewChars = (work: Work) => {
+  return work.content.slice(0, 6).split('')
+}
+
+const getCharContent = (work: Work, index: number, char: string) => {
+  // 1. 优先使用作品中指定的样式
+  const sampleId = work.charStyles[index]
+  if (sampleId) {
+    // 这里我们没有加载所有sample的详情，只加载了最新的map
+    // 如果作品里选的不是最新的，这里可能显示不出来，或者显示最新的
+    // 为了简化，这里如果找不到指定ID的，就尝试用最新的
+    // 实际应该在列表页也加载必要的数据，或者存缩略图
+    // 暂时用最新的样本代替
+  }
+
+  const sample = samplesMap.value[char]
+  return sample ? sample.svgPath : char
+}
+
+const getCharViewBox = (work: Work, index: number, char: string) => {
+  // 同样，优先使用作品调整，但列表页为了性能可能不应用调整
+  // 或者简单应用最新的样本viewBox
+  const sample = samplesMap.value[char]
+  return sample ? sample.svgViewBox : undefined
 }
 </script>
 
@@ -69,9 +108,23 @@ const editWork = (work: Work) => {
 
 .work-item {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   cursor: pointer;
+  gap: 12px;
+}
+
+.work-preview-mini {
+  display: flex;
+  flex-wrap: wrap;
+  width: 80px; /* 3 * 24 + gap */
+  gap: 2px;
+  background: #f9f9f9;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.work-info {
+  flex: 1;
 }
 
 .work-info h3 {
@@ -86,16 +139,6 @@ const editWork = (work: Work) => {
   font-size: 12px;
   color: #888;
   font-weight: normal;
-}
-
-.preview-text {
-  font-size: 14px;
-  color: #666;
-  margin-bottom: 8px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 
 .date {

@@ -8,7 +8,8 @@
       @click-right="save"
     >
       <template #right>
-        <van-button type="primary" size="small">保存</van-button>
+        <van-button type="primary" size="small" @click="save">保存</van-button>
+        <van-button size="small" icon="replay" @click="refreshRandom" style="margin-left: 8px">随机</van-button>
       </template>
     </van-nav-bar>
 
@@ -33,6 +34,16 @@
             </van-radio-group>
           </template>
         </van-cell>
+        <van-cell title="格子样式">
+          <template #right-icon>
+            <van-radio-group v-model="work.gridType" direction="horizontal">
+              <van-radio name="mi">米字</van-radio>
+              <van-radio name="tian">田字</van-radio>
+              <van-radio name="hui">回字</van-radio>
+              <van-radio name="none">无</van-radio>
+            </van-radio-group>
+          </template>
+        </van-cell>
       </van-cell-group>
 
       <div class="preview-area" :class="work.layout">
@@ -43,10 +54,10 @@
           @click="openSelector(index, char)"
         >
           <GridDisplay
-            :size="60"
+            :size="40"
             :content="getDisplayContent(index, char)"
             :viewBox="getDisplayViewBox(index)"
-            :type="settings.gridType"
+            :type="work.gridType || settings.gridType"
           />
           <!-- 如果没有收集该字，显示提示 -->
           <div v-if="!hasSample(char)" class="missing-mark"></div>
@@ -57,6 +68,10 @@
     <!-- 选字弹窗 -->
     <van-action-sheet v-model:show="showSelector" :title="`选择 '${selectedChar}' 的样式`">
       <div class="selector-content">
+        <div class="selector-actions" style="padding: 10px; text-align: center; border-bottom: 1px solid #eee;">
+             <van-button size="small" icon="edit" @click="openAdjustment">调整位置/大小</van-button>
+        </div>
+
         <div
           class="sample-option"
           @click="selectSample(null)"
@@ -82,6 +97,14 @@
         </div>
       </div>
     </van-action-sheet>
+
+    <CharacterAdjustmentDialog
+      v-model:show="showAdjustment"
+      :content="getDisplayContent(selectedIndex, selectedChar)"
+      :grid-type="work.gridType === 'none' ? 'mi' : (work.gridType || settings.gridType)"
+      :initial-data="adjustmentInitialData"
+      @save="saveAdjustment"
+    />
   </div>
 </template>
 
@@ -90,6 +113,7 @@ import { ref, computed, onMounted, toRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getWork, saveWork, getSamplesByChar, getSettings } from '@/services/db'
 import GridDisplay from '@/components/GridDisplay.vue'
+import CharacterAdjustmentDialog from '@/components/CharacterAdjustmentDialog.vue'
 import type { Work, CharacterSample, AppSettings } from '@/types'
 import { showToast } from 'vant'
 
@@ -103,7 +127,9 @@ const work = ref<Work>({
   author: '',
   content: '',
   charStyles: {},
+  charAdjustments: {},
   layout: 'horizontal',
+  gridType: 'mi',
   createdAt: Date.now(),
   updatedAt: Date.now()
 })
@@ -131,6 +157,9 @@ onMounted(async () => {
     const w = await getWork(route.params.id as string)
     if (w) {
       work.value = w
+      if (!work.value.gridType) {
+        work.value.gridType = settings.value.gridType
+      }
       // 预加载所有字符的样本
       preloadSamples(w.content)
     }
@@ -148,6 +177,25 @@ const preloadSamples = async (text: string) => {
       samplesCache.value[char] = await getSamplesByChar(char)
     }
   }
+  // 随机分配样式
+  randomizeStyles(text)
+}
+
+const randomizeStyles = (text: string) => {
+  // 只有在新建作品或内容变化时，且没有手动指定样式时，才进行随机分配
+  // 这里简单处理：如果某个位置没有指定样式，且该字有多个样本，则随机选择一个
+  text.split('').forEach((char, index) => {
+    if (!char.trim()) return
+
+    // 如果该位置已经有样式了，跳过（保留用户选择）
+    if (work.value.charStyles[index]) return
+
+    const samples = samplesCache.value[char]
+    if (samples && samples.length > 1) {
+      const randomIndex = Math.floor(Math.random() * samples.length)
+      work.value.charStyles[index] = samples[randomIndex].id
+    }
+  })
 }
 
 const getDisplayContent = (index: number, char: string) => {
@@ -159,6 +207,7 @@ const getDisplayContent = (index: number, char: string) => {
   }
 
   // 如果没有指定样式，尝试使用最新的一个样本（默认）
+  // 修改逻辑：如果没有指定样式，且有样本，随机选一个（实际上在preloadSamples里已经分配了，这里是兜底）
   const samples = samplesCache.value[char]
   if (samples && samples.length > 0) {
     return samples[0].svgPath
@@ -168,6 +217,17 @@ const getDisplayContent = (index: number, char: string) => {
 }
 
 const getDisplayViewBox = (index: number) => {
+  // 1. 优先使用作品特定的调整
+  const adjustment = work.value.charAdjustments?.[index]
+  if (adjustment) {
+    const { scale, offsetX, offsetY } = adjustment
+    const width = 100 / scale
+    const height = 100 / scale
+    const minX = 50 - offsetX - width / 2
+    const minY = 50 - offsetY - height / 2
+    return `${minX} ${minY} ${width} ${height}`
+  }
+
   const char = charList.value[index]
   const sampleId = work.value.charStyles[index]
   let sample: CharacterSample | undefined
@@ -175,7 +235,11 @@ const getDisplayViewBox = (index: number) => {
   if (sampleId) {
     sample = samplesCache.value[char]?.find(s => s.id === sampleId)
   } else {
-    sample = samplesCache.value[char]?.[0]
+    // 兜底
+    const samples = samplesCache.value[char]
+    if (samples && samples.length > 0) {
+      sample = samples[0]
+    }
   }
 
   return sample?.svgViewBox
@@ -191,10 +255,32 @@ const selectedIndex = ref(-1)
 const selectedChar = ref('')
 const currentSamples = computed(() => samplesCache.value[selectedChar.value] || [])
 
+// 调整相关
+const showAdjustment = ref(false)
+const adjustmentInitialData = ref({ scale: 1.0, offsetX: 0, offsetY: 0 })
+
 const openSelector = (index: number, char: string) => {
   selectedIndex.value = index
   selectedChar.value = char
   showSelector.value = true
+}
+
+const openAdjustment = () => {
+  const adjustment = work.value.charAdjustments?.[selectedIndex.value]
+  if (adjustment) {
+    adjustmentInitialData.value = { ...adjustment }
+  } else {
+    adjustmentInitialData.value = { scale: 1.0, offsetX: 0, offsetY: 0 }
+  }
+  showSelector.value = false
+  showAdjustment.value = true
+}
+
+const saveAdjustment = (data: { scale: number, offsetX: number, offsetY: number }) => {
+  if (!work.value.charAdjustments) {
+    work.value.charAdjustments = {}
+  }
+  work.value.charAdjustments[selectedIndex.value] = data
 }
 
 const selectSample = (sampleId: string | null) => {
@@ -204,6 +290,11 @@ const selectSample = (sampleId: string | null) => {
     delete work.value.charStyles[selectedIndex.value]
   }
   showSelector.value = false
+}
+
+const refreshRandom = () => {
+  work.value.charStyles = {} // 清空当前选择
+  randomizeStyles(work.value.content)
 }
 
 const save = async () => {
@@ -239,7 +330,6 @@ const save = async () => {
 }
 
 .preview-area.vertical {
-  flex-direction: row-reverse;
   writing-mode: vertical-rl;
   height: 500px; /* 竖排需要固定高度或自动撑开 */
   overflow-x: auto;
