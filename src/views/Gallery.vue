@@ -12,21 +12,26 @@
         class="work-item card"
         @click="editWork(work)"
       >
-        <div class="work-preview-mini">
+        <div class="work-header">
+          <div class="work-title-row">
+            <h3>{{ work.title }} <span v-if="work.author" class="author">{{ work.author }}</span></h3>
+            <div class="work-meta">
+              <span class="stats">总字数: {{ work.content.length }} / 自写: {{ getOwnCount(work) }}</span>
+            </div>
+          </div>
+          <van-icon name="arrow" color="#ccc" />
+        </div>
+
+        <div class="work-preview-line">
           <GridDisplay
             v-for="(char, idx) in getPreviewChars(work)"
             :key="idx"
-            :size="24"
+            :size="32"
             :content="getCharContent(work, idx, char)"
             :viewBox="getCharViewBox(work, idx, char)"
             :type="'none'"
           />
         </div>
-        <div class="work-info">
-          <h3>{{ work.title }} <span v-if="work.author" class="author">by {{ work.author }}</span></h3>
-          <span class="date">{{ new Date(work.updatedAt).toLocaleDateString() }}</span>
-        </div>
-        <van-icon name="arrow" color="#ccc" />
       </div>
     </div>
 
@@ -62,7 +67,7 @@ const editWork = (work: Work) => {
 }
 
 const getPreviewChars = (work: Work) => {
-  return work.content.slice(0, 6).split('')
+  return work.content.split('')
 }
 
 const getCharContent = (work: Work, index: number, char: string) => {
@@ -81,10 +86,30 @@ const getCharContent = (work: Work, index: number, char: string) => {
 }
 
 const getCharViewBox = (work: Work, index: number, char: string) => {
-  // 同样，优先使用作品调整，但列表页为了性能可能不应用调整
-  // 或者简单应用最新的样本viewBox
+  // 1. 优先使用作品特定的调整
+  const adjustment = work.charAdjustments?.[index]
+  if (adjustment) {
+    const { scale, offsetX, offsetY } = adjustment
+    const width = 100 / scale
+    const height = 100 / scale
+    const minX = 50 - offsetX - width / 2
+    const minY = 50 - offsetY - height / 2
+    return `${minX} ${minY} ${width} ${height}`
+  }
+
   const sample = samplesMap.value[char]
   return sample ? sample.svgViewBox : undefined
+}
+
+const getOwnCount = (work: Work) => {
+  if (!work.content) return 0
+  let count = 0
+  for (const char of work.content) {
+    if (samplesMap.value[char]) {
+      count++
+    }
+  }
+  return count
 }
 </script>
 
@@ -108,31 +133,53 @@ const getCharViewBox = (work: Work, index: number, char: string) => {
 
 .work-item {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   cursor: pointer;
   gap: 12px;
 }
 
-.work-preview-mini {
+.work-header {
   display: flex;
-  flex-wrap: wrap;
-  width: 80px; /* 3 * 24 + gap */
-  gap: 2px;
-  background: #f9f9f9;
-  padding: 2px;
-  border-radius: 4px;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
 }
 
-.work-info {
+.work-title-row {
   flex: 1;
 }
 
-.work-info h3 {
+.work-title-row h3 {
   font-size: 16px;
   margin-bottom: 4px;
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.work-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: #999;
+}
+
+.work-preview-line {
+  display: flex;
+  gap: 4px;
+  overflow: hidden;
+  padding-bottom: 4px;
+  width: 100%;
+}
+
+.work-preview-line > * {
+  flex-shrink: 0;
+}
+
+.author {
+  font-size: 12px;
+  color: #888;
+  font-weight: normal;
 }
 
 .author {

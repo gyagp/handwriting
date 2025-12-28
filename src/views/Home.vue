@@ -2,30 +2,15 @@
   <div class="home-page">
     <div class="container">
       <h1 class="page-title">书法集字</h1>
-
-      <div class="stats-card card">
-        <div class="stat-item">
-          <span class="number">{{ collectedCount }}</span>
-          <span class="label">已收集</span>
-        </div>
-        <div class="stat-item">
-          <span class="number">{{ totalCount }}</span>
-          <span class="label">总字数</span>
-        </div>
-        <div class="stat-item">
-          <span class="number">{{ progress }}%</span>
-          <span class="label">进度</span>
-        </div>
-      </div>
     </div>
 
     <van-sticky>
       <div class="sticky-header">
         <van-search v-model="searchText" placeholder="搜索汉字或拼音" background="transparent" />
         <van-tabs v-model:active="activeTab" background="transparent">
-          <van-tab :title="`全部`" name="all"></van-tab>
-          <van-tab :title="`已收集`" name="collected"></van-tab>
-          <van-tab :title="`未收集`" name="uncollected"></van-tab>
+          <van-tab :title="`全部 (${totalCount})`" name="all"></van-tab>
+          <van-tab :title="`已收集 (${collectedCount} - ${progress}%)`" name="collected"></van-tab>
+          <van-tab :title="`未收集 (${uncollectedCount})`" name="uncollected"></van-tab>
         </van-tabs>
       </div>
     </van-sticky>
@@ -36,8 +21,11 @@
         :key="char.code"
         :info="char"
         :collected="!!collectedMap[char.char]"
-        :sample="collectedMap[char.char]?.svgPath"
-        :sampleViewBox="collectedMap[char.char]?.svgViewBox"
+        :sample="collectedMap[char.char]?.sample.svgPath"
+        :sampleViewBox="collectedMap[char.char]?.sample.svgViewBox"
+        :is-adjusted="!!collectedMap[char.char]?.sample.isAdjusted"
+        :total-count="collectedMap[char.char]?.totalCount"
+        :adjusted-count="collectedMap[char.char]?.adjustedCount"
         :grid-type="settings.gridType"
         @click="goToDetail(char)"
       />
@@ -56,15 +44,15 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { getCollectedSamplesMap, getSettings } from '@/services/db'
+import { getCollectedStatsMap, getSettings, type CharacterStats } from '@/services/db'
 import { gb2312Level1Chars, getPinyin, getGB2312Code, getStrokes, getRadical, punctuationChars } from '@/data/gb2312-generator'
 import CharacterCard from '@/components/CharacterCard.vue'
-import type { CharacterInfo, CharacterSample, AppSettings } from '@/types'
+import type { CharacterInfo, AppSettings } from '@/types'
 
 const router = useRouter()
 const searchText = ref('')
 const activeTab = ref('all')
-const collectedMap = ref<Record<string, CharacterSample>>({})
+const collectedMap = ref<Record<string, CharacterStats>>({})
 const pageSize = 50
 const currentPage = ref(1)
 
@@ -94,7 +82,7 @@ const progress = computed(() => ((collectedCount.value / totalCount.value) * 100
 
 onMounted(async () => {
   const [map, savedSettings] = await Promise.all([
-    getCollectedSamplesMap(),
+    getCollectedStatsMap(),
     getSettings()
   ])
   collectedMap.value = map

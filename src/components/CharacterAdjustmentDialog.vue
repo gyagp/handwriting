@@ -23,7 +23,15 @@
         @touchstart="startDrag"
         @wheel.prevent="handleWheel"
       >
+        <div v-if="char" class="background-char">
+          <GridDisplay
+            type="none"
+            :size="200"
+            :content="char"
+          />
+        </div>
         <GridDisplay
+          class="foreground-char"
           :type="currentGridType"
           :size="200"
           :content="content"
@@ -33,8 +41,8 @@
       <div class="controls">
         <div class="control-item">
           <span>缩放</span>
-          <van-slider v-model="form.scale" :min="0.2" :max="2.0" :step="0.01" />
-          <van-stepper v-model="form.scale" :min="0.2" :max="2.0" :step="0.01" button-size="22px" input-width="40px" />
+          <van-slider v-model="form.scale" :min="0.05" :max="2.0" :step="0.01" />
+          <van-stepper v-model="form.scale" :min="0.05" :max="2.0" :step="0.01" button-size="22px" input-width="40px" />
         </div>
         <div class="control-item">
           <span>左右</span>
@@ -45,6 +53,9 @@
           <span>上下</span>
           <van-slider v-model="form.offsetY" :min="-200" :max="200" :step="0.1" />
           <van-stepper v-model="form.offsetY" :min="-200" :max="200" :step="0.1" button-size="22px" input-width="40px" />
+        </div>
+        <div class="control-item" style="justify-content: flex-end;">
+          <van-checkbox v-model="form.isAdjusted">标记为已精修</van-checkbox>
         </div>
       </div>
     </div>
@@ -59,19 +70,21 @@ import type { GridType } from '@/types'
 const props = defineProps<{
   show: boolean
   content: string
+  char?: string
   gridType?: GridType
-  initialData?: { scale: number; offsetX: number; offsetY: number }
+  initialData?: { scale: number; offsetX: number; offsetY: number; isAdjusted?: boolean }
 }>()
 
 const emit = defineEmits<{
   (e: 'update:show', val: boolean): void
-  (e: 'save', val: { scale: number; offsetX: number; offsetY: number }): void
+  (e: 'save', val: { scale: number; offsetX: number; offsetY: number; isAdjusted: boolean }): void
 }>()
 
 const form = ref({
   scale: 1.0,
   offsetX: 0,
-  offsetY: 0
+  offsetY: 0,
+  isAdjusted: false
 })
 
 const currentGridType = ref<GridType>('mi')
@@ -82,9 +95,14 @@ watch(
     if (val) {
       currentGridType.value = props.gridType || 'mi'
       if (props.initialData) {
-        form.value = { ...props.initialData }
+        form.value = {
+          scale: props.initialData.scale,
+          offsetX: props.initialData.offsetX,
+          offsetY: props.initialData.offsetY,
+          isAdjusted: props.initialData.isAdjusted ?? true // 默认打开弹窗就是为了调整，所以默认勾选
+        }
       } else {
-        form.value = { scale: 1.0, offsetX: 0, offsetY: 0 }
+        form.value = { scale: 1.0, offsetX: 0, offsetY: 0, isAdjusted: true }
       }
     }
   }
@@ -181,9 +199,34 @@ const handleWheel = (e: WheelEvent) => {
 }
 
 .preview-box {
+  position: relative;
   border: 1px solid #eee;
   cursor: move;
   touch-action: none;
+}
+
+.background-char {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.3;
+  pointer-events: none;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.background-char :deep(.text-content) {
+  font-family: "KaiTi", "STKaiti", "楷体", serif;
+}
+
+.foreground-char {
+  position: relative;
+  z-index: 1;
+  background-color: transparent !important;
 }
 
 .controls {

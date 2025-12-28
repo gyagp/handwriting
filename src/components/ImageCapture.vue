@@ -10,7 +10,12 @@
       <div class="actions">
         <van-button icon="replay" size="small" @click="reset">重选</van-button>
         <van-button icon="revoke" size="small" @click="rotate(-90)">左转</van-button>
-        <van-button icon="play" size="small" @click="rotate(90)" style="transform: rotate(90deg)">右转</van-button>
+        <van-button size="small" @click="rotate(90)">
+          <template #icon>
+            <van-icon name="revoke" style="transform: scaleX(-1)" />
+          </template>
+          右转
+        </van-button>
         <van-button type="primary" icon="success" size="small" @click="confirm">使用</van-button>
       </div>
     </div>

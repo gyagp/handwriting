@@ -15,6 +15,7 @@ export interface CharacterSample {
   svgViewBox: string        // SVG viewBox
   thumbnail: string         // 缩略图 Base64 (WebP)
   rating: number            // 评分 1-5
+  isAdjusted?: boolean      // 是否已精修调整
   createdAt: number         // 创建时间戳
   tags: string[]            // 标签
 }

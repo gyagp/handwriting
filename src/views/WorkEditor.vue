@@ -101,6 +101,7 @@
     <CharacterAdjustmentDialog
       v-model:show="showAdjustment"
       :content="getDisplayContent(selectedIndex, selectedChar)"
+      :char="selectedChar"
       :grid-type="work.gridType === 'none' ? 'mi' : (work.gridType || settings.gridType)"
       :initial-data="adjustmentInitialData"
       @save="saveAdjustment"
@@ -111,7 +112,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, toRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getWork, saveWork, getSamplesByChar, getSettings } from '@/services/db'
+import { getWork, saveWork, getSamplesByChar, getSettings, saveSample } from '@/services/db'
 import GridDisplay from '@/components/GridDisplay.vue'
 import CharacterAdjustmentDialog from '@/components/CharacterAdjustmentDialog.vue'
 import type { Work, CharacterSample, AppSettings } from '@/types'
@@ -257,7 +258,7 @@ const currentSamples = computed(() => samplesCache.value[selectedChar.value] || 
 
 // 调整相关
 const showAdjustment = ref(false)
-const adjustmentInitialData = ref({ scale: 1.0, offsetX: 0, offsetY: 0 })
+const adjustmentInitialData = ref({ scale: 1.0, offsetX: 0, offsetY: 0, isAdjusted: false })
 
 const openSelector = (index: number, char: string) => {
   selectedIndex.value = index
@@ -266,21 +267,103 @@ const openSelector = (index: number, char: string) => {
 }
 
 const openAdjustment = () => {
+  // 1. 优先使用作品特定的调整
   const adjustment = work.value.charAdjustments?.[selectedIndex.value]
   if (adjustment) {
-    adjustmentInitialData.value = { ...adjustment }
+    adjustmentInitialData.value = { ...adjustment, isAdjusted: false } // 作品调整暂不涉及字库标记
   } else {
-    adjustmentInitialData.value = { scale: 1.0, offsetX: 0, offsetY: 0 }
+    // 2. 如果没有作品特定调整，尝试从当前选中的样本中解析调整参数
+    const sampleId = work.value.charStyles[selectedIndex.value]
+    let sample: CharacterSample | undefined
+
+    if (sampleId) {
+      sample = samplesCache.value[selectedChar.value]?.find(s => s.id === sampleId)
+    } else {
+      // 兜底：使用默认样本
+      const samples = samplesCache.value[selectedChar.value]
+      if (samples && samples.length > 0) {
+        sample = samples[0]
+      }
+    }
+
+    if (sample && sample.svgViewBox) {
+      const [minX, minY, width, height] = sample.svgViewBox.split(' ').map(Number)
+      // 反向计算
+      const scale = 100 / width
+      const offsetX = 50 - width / 2 - minX
+      const offsetY = 50 - height / 2 - minY
+
+      adjustmentInitialData.value = {
+        scale: Number(scale.toFixed(2)),
+        offsetX: Number(offsetX.toFixed(2)),
+        offsetY: Number(offsetY.toFixed(2)),
+        isAdjusted: !!sample.isAdjusted
+      }
+    } else {
+      adjustmentInitialData.value = { scale: 1.0, offsetX: 0, offsetY: 0, isAdjusted: false }
+    }
   }
   showSelector.value = false
   showAdjustment.value = true
 }
 
-const saveAdjustment = (data: { scale: number, offsetX: number, offsetY: number }) => {
-  if (!work.value.charAdjustments) {
-    work.value.charAdjustments = {}
+const saveAdjustment = async (data: { scale: number, offsetX: number, offsetY: number, isAdjusted: boolean }) => {
+  // 用户要求：直接调用字库的调整，调整后的结果也保存到字库
+  // 这意味着我们不再保存到 work.charAdjustments，而是直接更新 CharacterSample
+
+  // 1. 找到当前使用的样本
+  const sampleId = work.value.charStyles[selectedIndex.value]
+  let sample: CharacterSample | undefined
+
+  if (sampleId) {
+    sample = samplesCache.value[selectedChar.value]?.find(s => s.id === sampleId)
+  } else {
+    const samples = samplesCache.value[selectedChar.value]
+    if (samples && samples.length > 0) {
+      sample = samples[0]
+    }
   }
-  work.value.charAdjustments[selectedIndex.value] = data
+
+  if (sample) {
+    // 2. 计算新的 viewBox
+    const { scale, offsetX, offsetY, isAdjusted } = data
+    const width = 100 / scale
+    const height = 100 / scale
+    const minX = 50 - offsetX - width / 2
+    const minY = 50 - offsetY - height / 2
+    const newViewBox = `${minX} ${minY} ${width} ${height}`
+
+    // 3. 更新样本
+    const updatedSample = {
+      ...toRaw(sample),
+      svgViewBox: newViewBox,
+      isAdjusted: isAdjusted
+    }
+
+    await saveSample(updatedSample)
+
+    // 4. 更新本地缓存
+    const samples = samplesCache.value[selectedChar.value]
+    if (samples) {
+      const index = samples.findIndex(s => s.id === updatedSample.id)
+      if (index !== -1) {
+        samples[index] = updatedSample
+      }
+    }
+
+    // 5. 清除可能存在的作品级调整（因为我们已经更新了源头，不需要覆盖了）
+    if (work.value.charAdjustments && work.value.charAdjustments[selectedIndex.value]) {
+      delete work.value.charAdjustments[selectedIndex.value]
+    }
+
+    showToast('已保存到字库')
+  } else {
+    // 如果没有样本（理论上不应该发生，除非是空字），则回退到保存到作品
+    if (!work.value.charAdjustments) {
+      work.value.charAdjustments = {}
+    }
+    work.value.charAdjustments[selectedIndex.value] = data
+  }
 }
 
 const selectSample = (sampleId: string | null) => {
@@ -327,12 +410,15 @@ const save = async () => {
   flex-wrap: wrap;
   gap: 8px;
   align-content: flex-start;
+  justify-content: center;
 }
 
 .preview-area.vertical {
   writing-mode: vertical-rl;
   height: 500px; /* 竖排需要固定高度或自动撑开 */
   overflow-x: auto;
+  align-content: center;
+  justify-content: flex-start;
 }
 
 .char-box {

@@ -58,6 +58,7 @@
     <CharacterAdjustmentDialog
       v-model:show="showEdit"
       :content="currentSample?.svgPath || ''"
+      :char="char"
       :grid-type="settings.gridType"
       :initial-data="editForm"
       @save="saveEdit"
@@ -93,7 +94,8 @@ const showEdit = ref(false)
 const editForm = ref({
   scale: 1.0,
   offsetX: 0,
-  offsetY: 0
+  offsetY: 0,
+  isAdjusted: false
 })
 
 const openEdit = () => {
@@ -110,15 +112,16 @@ const openEdit = () => {
   editForm.value = {
     scale: Number(scale.toFixed(2)),
     offsetX: Number(offsetX.toFixed(2)),
-    offsetY: Number(offsetY.toFixed(2))
+    offsetY: Number(offsetY.toFixed(2)),
+    isAdjusted: !!currentSample.value.isAdjusted
   }
   showEdit.value = true
 }
 
-const saveEdit = async (data: { scale: number; offsetX: number; offsetY: number }) => {
+const saveEdit = async (data: { scale: number; offsetX: number; offsetY: number; isAdjusted: boolean }) => {
   if (!currentSample.value) return
 
-  const { scale, offsetX, offsetY } = data
+  const { scale, offsetX, offsetY, isAdjusted } = data
   const width = 100 / scale
   const height = 100 / scale
   const minX = 50 - offsetX - width / 2
@@ -127,7 +130,8 @@ const saveEdit = async (data: { scale: number; offsetX: number; offsetY: number 
 
   const updatedSample = {
     ...toRaw(currentSample.value),
-    svgViewBox: newViewBox
+    svgViewBox: newViewBox,
+    isAdjusted: isAdjusted
   }
 
   await saveSample(updatedSample)
