@@ -33,6 +33,30 @@ export function generateGB2312Level1Chars(): string[] {
   return chars
 }
 
+// 生成GB2312二级字库的所有汉字
+export function generateGB2312Level2Chars(): string[] {
+  const chars: string[] = []
+
+  // 二级汉字区：D8-F7 (高字节)，A1-FE (低字节)
+  for (let high = 0xD8; high <= 0xF7; high++) {
+    for (let low = 0xA1; low <= 0xFE; low++) {
+      // 将GB2312编码转换为Unicode字符
+      const gb2312Bytes = new Uint8Array([high, low])
+      try {
+        const decoder = new TextDecoder('gb2312')
+        const char = decoder.decode(gb2312Bytes)
+        if (char && char.length === 1 && char !== '') {
+          chars.push(char)
+        }
+      } catch {
+        // 忽略无法解码的字符
+      }
+    }
+  }
+
+  return chars
+}
+
 // 拼音数据 - 按GB2312一级字库顺序（部分核心数据）
 // 完整数据较大，这里提供生成逻辑和部分示例
 const pinyinMap: Record<string, string> = {
@@ -101,5 +125,7 @@ export const punctuationChars = [
 
 // 默认导出生成的字符列表
 export const gb2312Level1Chars = [...punctuationChars, ...generateGB2312Level1Chars()]
+export const gb2312Level2Chars = generateGB2312Level2Chars()
+export const gb2312AllChars = [...punctuationChars, ...generateGB2312Level1Chars(), ...generateGB2312Level2Chars()]
 
-export default gb2312Level1Chars
+export default gb2312AllChars

@@ -1,6 +1,6 @@
 <template>
-  <div 
-    class="character-card" 
+  <div
+    class="character-card"
     :class="{ 'is-complete': collected && adjustedCount === totalCount && totalCount > 0 }"
     @click="$emit('click')"
   >
@@ -25,8 +25,8 @@
     <div class="card-footer">
       <span class="char-code">{{ info.code }}</span>
       <div class="status-icons">
-        <span 
-          v-if="collected && totalCount" 
+        <span
+          v-if="collected && totalCount"
           class="count-badge"
           :class="{ 'fully-adjusted': adjustedCount === totalCount && totalCount > 0 }"
         >
