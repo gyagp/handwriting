@@ -44,6 +44,14 @@
             </van-radio-group>
           </template>
         </van-cell>
+        <van-cell title="显示大小">
+          <template #right-icon>
+            <div style="width: 150px; display: flex; align-items: center;">
+              <van-slider v-model="zoomLevel" :min="20" :max="150" />
+              <span style="margin-left: 10px; font-size: 12px; color: #999">{{ zoomLevel }}</span>
+            </div>
+          </template>
+        </van-cell>
       </van-cell-group>
 
       <div class="preview-area" :class="work.layout">
@@ -54,7 +62,7 @@
           @click="openSelector(index, char)"
         >
           <GridDisplay
-            :size="40"
+            :size="zoomLevel"
             :content="getDisplayContent(index, char)"
             :viewBox="getDisplayViewBox(index)"
             :type="work.gridType || settings.gridType"
@@ -121,6 +129,8 @@ import { showToast } from 'vant'
 const route = useRoute()
 const router = useRouter()
 const isEdit = computed(() => !!route.params.id)
+
+const zoomLevel = ref(40)
 
 const work = ref<Work>({
   id: crypto.randomUUID(),
