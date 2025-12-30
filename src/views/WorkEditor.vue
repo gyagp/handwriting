@@ -1,22 +1,28 @@
 <template>
   <div class="work-editor container">
     <van-nav-bar
-      :title="isEdit ? '编辑作品' : '新建作品'"
+      :title="isEdit ? (isReadOnly ? '查看作品' : '编辑作品') : '新建作品'"
       left-text="返回"
       left-arrow
       @click-left="$router.back()"
       @click-right="save"
     >
       <template #right>
-        <van-button type="primary" size="small" @click="save">保存</van-button>
-        <van-button size="small" icon="replay" @click="refreshRandom" style="margin-left: 8px">随机</van-button>
+        <template v-if="!isReadOnly">
+          <van-button type="primary" size="small" @click="save">{{ (isPublic && currentUser?.role !== 'admin') ? '提交审核' : '保存' }}</van-button>
+          <van-button size="small" icon="replay" @click="refreshRandom" style="margin-left: 8px" v-if="currentUser?.role !== 'admin'">随机</van-button>
+        </template>
+        <template v-else>
+           <van-button size="small" icon="star-o" @click="showRating = true">评分</van-button>
+        </template>
       </template>
     </van-nav-bar>
 
     <div class="editor-content">
       <van-cell-group inset>
-        <van-field v-model="work.title" label="标题" placeholder="请输入作品标题" />
-        <van-field v-model="work.author" label="作者" placeholder="请输入作者姓名" />
+        <van-field v-model="work.title" label="标题" placeholder="请输入作品标题" :readonly="isReadOnly" />
+        <van-field v-model="work.author" label="作者" placeholder="请输入作者姓名" :readonly="isReadOnly" />
+        <van-field :model-value="getUsername(work.userId)" label="上传人" readonly v-if="currentUser?.role === 'admin' && work.userId" />
         <van-field
           v-model="work.content"
           rows="3"
@@ -24,11 +30,12 @@
           label="内容"
           type="textarea"
           placeholder="请输入诗词或文章内容"
+          :readonly="isReadOnly"
           @update:model-value="handleContentChange"
         />
         <van-cell title="排版方向">
           <template #right-icon>
-            <van-radio-group v-model="work.layout" direction="horizontal">
+            <van-radio-group v-model="work.layout" direction="horizontal" :disabled="isReadOnly">
               <van-radio name="horizontal">横排</van-radio>
               <van-radio name="vertical">竖排</van-radio>
             </van-radio-group>
@@ -36,7 +43,7 @@
         </van-cell>
         <van-cell title="格子样式">
           <template #right-icon>
-            <van-radio-group v-model="work.gridType" direction="horizontal">
+            <van-radio-group v-model="work.gridType" direction="horizontal" :disabled="isReadOnly">
               <van-radio name="mi">米字</van-radio>
               <van-radio name="tian">田字</van-radio>
               <van-radio name="hui">回字</van-radio>
@@ -52,7 +59,25 @@
             </div>
           </template>
         </van-cell>
+        <van-cell title="公开可见" v-if="!isReadOnly">
+          <template #right-icon>
+            <van-switch v-model="isPublic" size="20" />
+          </template>
+        </van-cell>
+        <van-cell title="状态" v-if="isEdit">
+           <template #right-icon>
+              <van-tag v-if="work.status === 'published' && work.visibility === 'public'" type="success">已发布</van-tag>
+              <van-tag v-else-if="work.visibility === 'private'" type="primary">私有</van-tag>
+              <van-tag v-else-if="work.status === 'pending'" type="warning">审核中</van-tag>
+              <van-tag v-else-if="work.status === 'rejected'" type="danger">已驳回</van-tag>
+              <van-tag v-else type="default">草稿</van-tag>
+           </template>
+        </van-cell>
       </van-cell-group>
+
+      <div style="margin: 16px 16px 0;" v-if="canDelete">
+        <van-button type="danger" block @click="handleDelete">删除作品</van-button>
+      </div>
 
       <div class="preview-area" :class="work.layout">
         <div
@@ -68,13 +93,13 @@
             :type="work.gridType || settings.gridType"
           />
           <!-- 如果没有收集该字，显示提示 -->
-          <div v-if="!hasSample(char)" class="missing-mark"></div>
+          <div v-if="!hasSample(char) && !isReadOnly && currentUser?.role !== 'admin'" class="missing-mark"></div>
         </div>
       </div>
     </div>
 
     <!-- 选字弹窗 -->
-    <van-action-sheet v-model:show="showSelector" :title="`选择 '${selectedChar}' 的样式`">
+    <van-action-sheet v-model:show="showSelector" :title="`选择 '${selectedChar}' 的样式`" v-if="!isReadOnly">
       <div class="selector-content">
         <div class="selector-actions" style="padding: 10px; text-align: center; border-bottom: 1px solid #eee;">
              <van-button size="small" icon="edit" @click="openAdjustment">调整位置/大小</van-button>
@@ -114,26 +139,40 @@
       :initial-data="adjustmentInitialData"
       @save="saveAdjustment"
     />
+
+    <van-dialog v-model:show="showRating" title="评分" show-cancel-button @confirm="submitRating">
+      <div style="display: flex; justify-content: center; padding: 20px;">
+        <van-rate v-model="ratingScore" :count="5" size="30" />
+      </div>
+      <div style="text-align: center; color: #666;">{{ ratingScore * 20 }} 分</div>
+    </van-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, toRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getWork, saveWork, getSamplesByChar, getSettings, saveSample } from '@/services/db'
+import { getWork, saveWork, getSamplesByChar, getSettings, saveSample, currentUser, saveRating, getMyRating, getUsername, deleteWork } from '@/services/db'
 import GridDisplay from '@/components/GridDisplay.vue'
 import CharacterAdjustmentDialog from '@/components/CharacterAdjustmentDialog.vue'
 import type { Work, CharacterSample, AppSettings } from '@/types'
-import { showToast } from 'vant'
+import { showToast, showDialog } from 'vant'
 
 const route = useRoute()
 const router = useRouter()
 const isEdit = computed(() => !!route.params.id)
 
 const zoomLevel = ref(40)
+const isPublic = ref(false)
+const isReadOnly = ref(false)
+const showRating = ref(false)
+const ratingScore = ref(0)
 
 const work = ref<Work>({
   id: crypto.randomUUID(),
+  userId: '', // Will be set by saveWork
+  visibility: 'private',
+  status: 'draft',
   title: '',
   author: '',
   content: '',
@@ -160,6 +199,33 @@ const charList = computed(() => {
   return work.value.content.split('').filter(c => c.trim())
 })
 
+const canDelete = computed(() => {
+  if (!isEdit.value) return false
+  if (currentUser.value?.role === 'admin') {
+    return work.value.visibility === 'public'
+  }
+  return work.value.userId === currentUser.value?.id
+})
+
+const handleDelete = () => {
+  showDialog({
+    title: '确认删除',
+    message: '确定要删除这个作品吗？此操作无法撤销。',
+    showCancelButton: true,
+    confirmButtonColor: '#ee0a24'
+  }).then(async (action) => {
+    if (action === 'confirm') {
+      try {
+        await deleteWork(work.value.id)
+        showToast('已删除')
+        router.back()
+      } catch (e: any) {
+        showToast('删除失败: ' + e.message)
+      }
+    }
+  })
+}
+
 onMounted(async () => {
   const s = await getSettings()
   if (s) settings.value = s
@@ -168,14 +234,36 @@ onMounted(async () => {
     const w = await getWork(route.params.id as string)
     if (w) {
       work.value = w
+      isPublic.value = w.visibility === 'public'
       if (!work.value.gridType) {
         work.value.gridType = settings.value.gridType
       }
+
+      // Check permissions
+      if (w.userId !== currentUser.value?.id && currentUser.value?.role !== 'admin') {
+         isReadOnly.value = true
+         // Load my rating
+         const myScore = getMyRating(w.id, 'work')
+         if (myScore) ratingScore.value = myScore / 20
+      }
+
       // 预加载所有字符的样本
       preloadSamples(w.content)
+    } else {
+      showToast('作品不存在或无权访问')
+      router.back()
     }
   }
 })
+
+const submitRating = async () => {
+  try {
+    await saveRating(work.value.id, 'work', ratingScore.value * 20)
+    showToast('评分成功')
+  } catch (e: any) {
+    showToast('评分失败: ' + e.message)
+  }
+}
 
 const handleContentChange = (val: string) => {
   preloadSamples(val)
@@ -189,7 +277,9 @@ const preloadSamples = async (text: string) => {
     }
   }
   // 随机分配样式
-  randomizeStyles(text)
+  if (!isReadOnly.value) {
+     randomizeStyles(text)
+  }
 }
 
 const randomizeStyles = (text: string) => {
@@ -271,6 +361,7 @@ const showAdjustment = ref(false)
 const adjustmentInitialData = ref({ scale: 1.0, offsetX: 0, offsetY: 0, isAdjusted: false })
 
 const openSelector = (index: number, char: string) => {
+  if (isReadOnly.value) return
   selectedIndex.value = index
   selectedChar.value = char
   showSelector.value = true
@@ -395,14 +486,20 @@ const save = async () => {
     showToast('请输入标题')
     return
   }
+  work.value.visibility = isPublic.value ? 'public' : 'private'
   if (!work.value.content) {
     showToast('请输入内容')
     return
   }
 
-  await saveWork(toRaw(work.value))
-  showToast('保存成功')
-  router.back()
+  try {
+    await saveWork(toRaw(work.value))
+    showToast('保存成功')
+    router.back()
+  } catch (e: any) {
+    showToast('保存失败: ' + e.message)
+    console.error(e)
+  }
 }
 </script>
 

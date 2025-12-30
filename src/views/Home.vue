@@ -1,18 +1,21 @@
 <template>
   <div class="home-page">
     <div class="container">
-      <h1 class="page-title">书法集字</h1>
+      <h1 class="page-title">{{ currentUser?.role === 'admin' ? '汉字库' : '字集' }}</h1>
     </div>
 
     <van-sticky>
       <div class="sticky-header">
         <van-search v-model="searchText" placeholder="搜索汉字或拼音" background="transparent" />
-        <van-tabs v-model:active="activeTab" background="transparent">
+        <van-tabs v-if="currentUser?.role !== 'admin'" v-model:active="activeTab" background="transparent">
           <van-tab :title="`全部 (${totalCount})`" name="all"></van-tab>
           <van-tab :title="`已精修 (${collectedAdjustedCount} - ${collectedAdjustedPercentage}%)`" name="collected-adjusted"></van-tab>
           <van-tab :title="`未精修 (${collectedUnadjustedCount} - ${collectedUnadjustedPercentage}%)`" name="collected-unadjusted"></van-tab>
           <van-tab :title="`未收集 (${uncollectedCount} - ${uncollectedPercentage}%)`" name="uncollected"></van-tab>
         </van-tabs>
+        <div v-else class="admin-stats">
+          共 {{ totalCount }} 字
+        </div>
       </div>
     </van-sticky>
 
@@ -21,12 +24,12 @@
         v-for="char in displayList"
         :key="char.code"
         :info="char"
-        :collected="!!collectedMap[char.char]"
-        :sample="activeTab === 'all' ? undefined : collectedMap[char.char]?.sample.svgPath"
-        :sampleViewBox="activeTab === 'all' ? undefined : collectedMap[char.char]?.sample.svgViewBox"
-        :is-adjusted="!!collectedMap[char.char]?.sample.isAdjusted"
-        :total-count="collectedMap[char.char]?.totalCount"
-        :adjusted-count="collectedMap[char.char]?.adjustedCount"
+        :collected="currentUser?.role === 'admin' ? false : !!collectedMap[char.char]"
+        :sample="currentUser?.role === 'admin' || activeTab === 'all' ? undefined : collectedMap[char.char]?.sample.svgPath"
+        :sampleViewBox="currentUser?.role === 'admin' || activeTab === 'all' ? undefined : collectedMap[char.char]?.sample.svgViewBox"
+        :is-adjusted="currentUser?.role === 'admin' ? false : !!collectedMap[char.char]?.sample.isAdjusted"
+        :total-count="currentUser?.role === 'admin' ? 0 : collectedMap[char.char]?.totalCount"
+        :adjusted-count="currentUser?.role === 'admin' ? 0 : collectedMap[char.char]?.adjustedCount"
         :grid-type="settings.gridType"
         @click="goToDetail(char)"
       />
@@ -45,7 +48,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { getCollectedStatsMap, getSettings, type CharacterStats } from '@/services/db'
+import { getCollectedStatsMap, getSettings, type CharacterStats, currentUser } from '@/services/db'
 import { gb2312AllChars, getPinyin, getGB2312Code, getStrokes, getRadical, punctuationChars } from '@/data/gb2312-generator'
 import CharacterCard from '@/components/CharacterCard.vue'
 import type { CharacterInfo, AppSettings } from '@/types'
@@ -192,5 +195,13 @@ const goToDetail = (char: CharacterInfo) => {
   padding: 20px;
   color: #666;
   cursor: pointer;
+}
+
+.admin-stats {
+  padding: 10px 16px;
+  font-size: 14px;
+  color: #666;
+  background-color: var(--bg-color);
+  text-align: center;
 }
 </style>

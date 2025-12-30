@@ -7,14 +7,38 @@ export interface CharacterInfo {
   strokes: number    // 笔画数
 }
 
+export type Visibility = 'private' | 'public'
+export type Role = 'user' | 'admin'
+export type WorkStatus = 'draft' | 'pending' | 'published' | 'rejected'
+
+export interface User {
+  id: string
+  username: string
+  password?: string // Simple password for now
+  role: Role
+  createdAt: number
+  collectedWorkIds?: string[] // IDs of public works collected by this user
+}
+
+export interface Rating {
+  userId: string
+  targetId: string
+  targetType: 'sample' | 'work'
+  score: number // 0-100
+  createdAt: number
+}
+
 // 收集的字符样本
 export interface CharacterSample {
   id: string                // 唯一ID
+  userId: string            // 用户ID
+  visibility: Visibility    // 可见性
   char: string              // 对应的汉字
   svgPath: string           // SVG路径数据 (压缩后)
   svgViewBox: string        // SVG viewBox
   thumbnail: string         // 缩略图 Base64 (WebP)
-  rating: number            // 评分 1-5
+  rating: number            // 自评评分 1-5 (保留用于兼容)
+  score?: number            // 公众评分平均分 0-100
   isAdjusted?: boolean      // 是否已精修调整
   createdAt: number         // 创建时间戳
   tags: string[]            // 标签
@@ -56,6 +80,9 @@ export interface AppSettings {
 // 书法作品
 export interface Work {
   id: string
+  userId: string            // 用户ID
+  visibility: Visibility    // 可见性
+  status: WorkStatus        // 审核状态
   title: string
   author?: string           // 作者
   content: string           // 作品内容
@@ -63,8 +90,10 @@ export interface Work {
   charAdjustments?: Record<number, { scale: number, offsetX: number, offsetY: number }> // 字符索引 -> 调整参数
   layout: 'horizontal' | 'vertical' // 排版方向
   gridType?: GridType       // 格子类型
+  score?: number            // 公众评分平均分 0-100
   createdAt: number
   updatedAt: number
+  authorDeleted?: boolean   // 作者是否已删除(仅对公共作品有效，删除后仅从作者列表移除)
 }
 
 // 导出数据格式

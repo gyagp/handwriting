@@ -2,11 +2,14 @@
   <div class="library-page">
     <van-sticky>
       <van-search v-model="searchText" placeholder="搜索汉字或拼音" />
-      <van-tabs v-model:active="activeTab">
+      <van-tabs v-model:active="activeTab" v-if="currentUser?.role !== 'admin'">
         <van-tab :title="`全部 (${totalCount})`" name="all"></van-tab>
         <van-tab :title="`已收集 (${collectedCount})`" name="collected"></van-tab>
         <van-tab :title="`未收集 (${uncollectedCount})`" name="uncollected"></van-tab>
       </van-tabs>
+      <div v-else class="admin-header">
+        <span>汉字库 ({{ totalCount }})</span>
+      </div>
     </van-sticky>
 
     <div class="char-grid container">
@@ -14,9 +17,9 @@
         v-for="char in displayList"
         :key="char.code"
         :info="char"
-        :collected="!!collectedMap[char.char]"
-        :sample="collectedMap[char.char]?.svgPath"
-        :sampleViewBox="collectedMap[char.char]?.svgViewBox"
+        :collected="currentUser?.role !== 'admin' && !!collectedMap[char.char]"
+        :sample="currentUser?.role !== 'admin' ? collectedMap[char.char]?.svgPath : undefined"
+        :sampleViewBox="currentUser?.role !== 'admin' ? collectedMap[char.char]?.svgViewBox : undefined"
         @click="goToDetail(char)"
       />
     </div>
@@ -35,8 +38,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { gb2312Level1Chars, getPinyin, getGB2312Code, getStrokes, getRadical, punctuationChars } from '@/data/gb2312-generator'
-import { getCollectedSamplesMap } from '@/services/db'
+import { gb2312AllChars, getPinyin, getGB2312Code, getStrokes, getRadical, punctuationChars } from '@/data/gb2312-generator'
+import { getCollectedSamplesMap, currentUser } from '@/services/db'
 import CharacterCard from '@/components/CharacterCard.vue'
 import type { CharacterInfo, CharacterSample } from '@/types'
 
@@ -51,7 +54,7 @@ const currentPage = ref(1)
 // 注意：gb2312Level1Chars 只是字符串数组，我们需要转换为 CharacterInfo 对象
 // 为了性能，我们只在需要时转换，或者分批转换
 const allChars = computed(() => {
-  return gb2312Level1Chars.map(char => ({
+  return gb2312AllChars.map(char => ({
     char,
     code: getGB2312Code(char),
     pinyin: punctuationChars.includes(char) ? '标点' : getPinyin(char),
@@ -80,11 +83,13 @@ const filteredList = computed(() => {
     )
   }
 
-  // Tab过滤
-  if (activeTab.value === 'collected') {
-    list = list.filter(c => collectedMap.value[c.char])
-  } else if (activeTab.value === 'uncollected') {
-    list = list.filter(c => !collectedMap.value[c.char])
+  // Tab过滤 (Admin always sees all)
+  if (currentUser.value?.role !== 'admin') {
+    if (activeTab.value === 'collected') {
+      list = list.filter(c => collectedMap.value[c.char])
+    } else if (activeTab.value === 'uncollected') {
+      list = list.filter(c => !collectedMap.value[c.char])
+    }
   }
 
   return list
@@ -108,6 +113,14 @@ const goToDetail = (char: CharacterInfo) => {
 </script>
 
 <style scoped>
+.admin-header {
+  background: #fff;
+  padding: 10px 16px;
+  font-size: 14px;
+  color: #666;
+  border-bottom: 1px solid #eee;
+}
+
 .char-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));

@@ -1,0 +1,28 @@
+{
+  "users": [
+    {
+      "id": "1c380a3d-c38e-487e-9f30-e82fae8e75b6",
+      "username": "gyagp",
+      "createdAt": 1767104963316,
+      "role": "user",
+      "password": "gy12345",
+      "collectedWorkIds": []
+    },
+    {
+      "id": "4af295ac-ffb1-49b2-8345-bb5c2da2e4ed",
+      "username": "admin",
+      "password": "admin12345",
+      "role": "admin",
+      "createdAt": 1767105844950
+    }
+  ],
+  "ratings": [],
+  "settings": {
+    "id": 1,
+    "gridType": "hui",
+    "gridSize": 100,
+    "autoRecognize": true,
+    "compressionLevel": 5,
+    "theme": "light"
+  }
+}

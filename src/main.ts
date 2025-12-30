@@ -11,9 +11,9 @@ import './styles/main.css'
 const app = createApp(App)
 
 app.use(createPinia())
-app.use(router)
 
 // 初始化数据库后再挂载应用，确保数据源为本地文件
 initSettings().then(() => {
+  app.use(router)
   app.mount('#app')
 })

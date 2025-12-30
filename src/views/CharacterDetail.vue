@@ -15,7 +15,8 @@
         :viewBox="currentSample?.svgViewBox"
       />
       <div class="actions" v-if="currentSample">
-        <van-button size="small" icon="edit" @click="openEdit">调整</van-button>
+        <van-button size="small" icon="edit" @click="openEdit" v-if="canEdit">调整</van-button>
+        <van-button size="small" icon="star-o" @click="openRating" v-else>评分</van-button>
       </div>
     </div>
 
@@ -35,7 +36,7 @@
     </div>
 
     <div class="samples-section">
-      <h3>我的收集 ({{ samples.length }})</h3>
+      <h3>收集 ({{ samples.length }})</h3>
       <div class="samples-list">
         <div
           v-for="sample in samples"
@@ -45,10 +46,16 @@
           @click="currentSample = sample"
         >
           <GridDisplay :size="60" :content="sample.svgPath" :viewBox="sample.svgViewBox" />
-          <van-icon name="cross" class="delete-btn" @click.stop="handleDelete(sample)" />
+          <div class="sample-score" v-if="sample.score">{{ sample.score }}</div>
+          <van-icon
+            name="cross"
+            class="delete-btn"
+            @click.stop="handleDelete(sample)"
+            v-if="canDelete(sample)"
+          />
         </div>
 
-        <div class="add-btn" @click="$router.push('/capture')">
+        <div class="add-btn" @click="$router.push('/capture')" v-if="currentUser?.role !== 'admin'">
           <van-icon name="plus" />
         </div>
       </div>
@@ -63,12 +70,19 @@
       :initial-data="editForm"
       @save="saveEdit"
     />
+
+    <van-dialog v-model:show="showRatingDialog" title="评分" show-cancel-button @confirm="submitRating">
+      <div style="display: flex; justify-content: center; padding: 20px;">
+        <van-rate v-model="ratingScore" :count="5" size="30" />
+      </div>
+      <div style="text-align: center; color: #666;">{{ ratingScore * 20 }} 分</div>
+    </van-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { getSamplesByChar, deleteSample, getSettings, saveSample } from '@/services/db'
+import { getSamplesByChar, deleteSample, getSettings, saveSample, saveRating, getMyRating, currentUser } from '@/services/db'
 import { gb2312Level1Chars, getPinyin, getRadical, getStrokes, getGB2312Code } from '@/data/gb2312-generator'
 import GridDisplay from '@/components/GridDisplay.vue'
 import CharacterAdjustmentDialog from '@/components/CharacterAdjustmentDialog.vue'
@@ -97,6 +111,35 @@ const editForm = ref({
   offsetY: 0,
   isAdjusted: false
 })
+
+const showRatingDialog = ref(false)
+const ratingScore = ref(0)
+
+const canEdit = computed(() => {
+  if (!currentSample.value) return false
+  if (currentUser.value?.role === 'admin') {
+    return currentSample.value.visibility === 'public'
+  }
+  return currentSample.value.userId === currentUser.value?.id
+})
+
+const canDelete = (sample: CharacterSample) => {
+  return sample.userId === currentUser.value?.id || currentUser.value?.role === 'admin'
+}
+
+const openRating = () => {
+  if (!currentSample.value) return
+  const myRating = getMyRating(currentSample.value.id, 'sample')
+  ratingScore.value = myRating ? myRating / 20 : 0
+  showRatingDialog.value = true
+}
+
+const submitRating = async () => {
+  if (!currentSample.value) return
+  await saveRating(currentSample.value.id, 'sample', ratingScore.value * 20)
+  showToast('评分成功')
+  await loadSamples()
+}
 
 const openEdit = () => {
   if (!currentSample.value) return
@@ -256,6 +299,17 @@ const handleDelete = (sample: CharacterSample) => {
   color: #999;
   font-size: 14px;
   box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+.sample-score {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  background: rgba(0,0,0,0.5);
+  color: #fff;
+  font-size: 10px;
+  padding: 1px 3px;
+  border-radius: 2px 0 0 0;
 }
 
 .add-btn {

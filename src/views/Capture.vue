@@ -60,6 +60,11 @@
               placeholder="按顺序输入汉字，自动填充下方"
               @update:model-value="handleBatchInput"
             />
+            <van-cell center title="公开可见">
+              <template #right-icon>
+                <van-switch v-model="isPublic" size="20" />
+              </template>
+            </van-cell>
             <div style="font-size: 12px; color: #999; padding: 0 16px 8px;">提示：识别出的字符顺序可能需要核对</div>
           </div>
         </div>
@@ -104,6 +109,7 @@ const saving = ref(false)
 const extractedChars = shallowRef<ExtractedCharacter[]>([])
 const selectedIds = ref<Set<string>>(new Set())
 const batchText = ref('')
+const isPublic = ref(false)
 
 // 临时存储待保存的数据
 interface PendingSaveItem extends CharacterSample {
@@ -221,13 +227,14 @@ const confirmSave = async () => {
       if (sample.tags) {
         sample.tags = [...sample.tags]
       }
+      sample.visibility = isPublic.value ? 'public' : 'private'
       await saveSample(sample)
     }
     showToast('保存成功')
     router.push('/')
-  } catch (error) {
+  } catch (error: any) {
     console.error(error)
-    showToast('保存失败')
+    showToast('保存失败: ' + error.message)
   } finally {
     saving.value = false
   }

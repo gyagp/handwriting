@@ -5,10 +5,10 @@
         <component :is="Component" />
       </keep-alive>
     </router-view>
-    <van-tabbar v-model="active" route>
-      <van-tabbar-item replace to="/" icon="home-o">首页</van-tabbar-item>
-      <van-tabbar-item replace to="/capture" icon="photograph">采集</van-tabbar-item>
-      <van-tabbar-item replace to="/gallery" icon="photo-o">作品</van-tabbar-item>
+    <van-tabbar v-model="active" route v-if="currentUser">
+      <van-tabbar-item replace to="/" icon="apps-o">字集</van-tabbar-item>
+      <van-tabbar-item replace to="/gallery" icon="photo-o">作品集</van-tabbar-item>
+      <van-tabbar-item replace to="/capture" icon="photograph" v-if="currentUser?.role !== 'admin'">采集</van-tabbar-item>
       <van-tabbar-item replace to="/settings" icon="setting-o">设置</van-tabbar-item>
     </van-tabbar>
   </div>
@@ -16,6 +16,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { currentUser } from '@/services/db'
 
 const active = ref(0)
 </script>

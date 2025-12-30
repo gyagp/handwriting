@@ -1,6 +1,13 @@
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router'
+import { currentUser } from '@/services/db'
+import { showToast } from 'vant'
 
 const routes: RouteRecordRaw[] = [
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/views/Login.vue')
+  },
   {
     path: '/',
     name: 'Home',
@@ -14,7 +21,8 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/capture',
     name: 'Capture',
-    component: () => import('@/views/Capture.vue')
+    component: () => import('@/views/Capture.vue'),
+    meta: { roles: ['user'] }
   },
   {
     path: '/gallery',
@@ -47,6 +55,31 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+router.beforeEach((to, from, next) => {
+  if (to.path === '/login') {
+    if (currentUser.value) {
+      next('/')
+    } else {
+      next()
+    }
+    return
+  }
+
+  if (!currentUser.value) {
+    next('/login')
+    return
+  }
+
+  if (to.meta.roles) {
+    const roles = to.meta.roles as string[]
+    if (currentUser.value && !roles.includes(currentUser.value.role)) {
+      showToast('无权访问')
+      return next('/')
+    }
+  }
+  next()
 })
 
 export default router
