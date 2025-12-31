@@ -29,7 +29,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { loginUser, registerUser } from '@/services/db'
-import { showToast, showDialog } from 'vant'
+import { showToast } from 'vant'
 
 const router = useRouter()
 const username = ref('')

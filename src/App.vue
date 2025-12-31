@@ -10,6 +10,7 @@
       <van-tabbar-item replace to="/gallery" icon="photo-o">作品集</van-tabbar-item>
       <van-tabbar-item replace to="/capture" icon="photograph" v-if="currentUser?.role !== 'admin'">采集</van-tabbar-item>
       <van-tabbar-item replace to="/settings" icon="setting-o">设置</van-tabbar-item>
+      <van-tabbar-item icon="user-o" @click="showUserInfo">{{ currentUser?.username }}</van-tabbar-item>
     </van-tabbar>
   </div>
 </template>
@@ -17,8 +18,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { currentUser } from '@/services/db'
+import { showToast } from 'vant'
 
 const active = ref(0)
+
+const showUserInfo = () => {
+  showToast(`当前登录: ${currentUser.value?.username}`)
+}
 </script>
 
 <style scoped>

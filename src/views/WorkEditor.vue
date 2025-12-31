@@ -1,20 +1,40 @@
 <template>
   <div class="work-editor container">
     <van-nav-bar
-      :title="isEdit ? (isReadOnly ? '查看作品' : '编辑作品') : '新建作品'"
+      :title="isEdit ? '作品' : '新建作品'"
       left-text="返回"
       left-arrow
       @click-left="$router.back()"
       @click-right="save"
     >
       <template #right>
-        <template v-if="!isReadOnly">
-          <van-button type="primary" size="small" @click="save">{{ (isPublic && currentUser?.role !== 'admin') ? '提交审核' : '保存' }}</van-button>
-          <van-button size="small" icon="replay" @click="refreshRandom" style="margin-left: 8px" v-if="currentUser?.role !== 'admin'">随机</van-button>
-        </template>
-        <template v-else>
-           <van-button size="small" icon="star-o" @click="showRating = true">评分</van-button>
-        </template>
+        <van-button
+          v-if="!isReadOnly"
+          type="primary"
+          size="small"
+          @click="save"
+        >
+          {{ (isPublic && currentUser?.role !== 'admin') ? '提交审核' : '保存' }}
+        </van-button>
+
+        <van-button
+          v-if="currentUser?.role !== 'admin' && (!isReadOnly || work.userId === currentUser?.id)"
+          size="small"
+          icon="replay"
+          @click="refreshRandom"
+          style="margin-left: 8px"
+        >
+          随机
+        </van-button>
+
+        <van-button
+          v-if="isReadOnly && work.userId !== currentUser?.id"
+          size="small"
+          icon="star-o"
+          @click="showRating = true"
+        >
+          评分
+        </van-button>
       </template>
     </van-nav-bar>
 
@@ -22,7 +42,13 @@
       <van-cell-group inset>
         <van-field v-model="work.title" label="标题" placeholder="请输入作品标题" :readonly="isReadOnly" />
         <van-field v-model="work.author" label="作者" placeholder="请输入作者姓名" :readonly="isReadOnly" />
-        <van-field :model-value="getUsername(work.userId)" label="上传人" readonly v-if="currentUser?.role === 'admin' && work.userId" />
+        <van-field :model-value="getUsername(work.userId)" label="书写者" readonly v-if="isReadOnly && work.userId && work.userId !== currentUser?.id" />
+        <van-field :model-value="getUsername(work.userId)" label="上传人" readonly v-if="currentUser?.role === 'admin' && work.userId && work.userId === currentUser?.id" />
+        <van-cell title="评分" v-if="work.score">
+          <template #right-icon>
+            <span style="color: #f7b500; font-weight: bold;">{{ work.score }}</span>
+          </template>
+        </van-cell>
         <van-field
           v-model="work.content"
           rows="3"
@@ -61,7 +87,7 @@
         </van-cell>
         <van-cell title="公开可见" v-if="!isReadOnly">
           <template #right-icon>
-            <van-switch v-model="isPublic" size="20" />
+            <van-switch v-model="isPublic" size="20" :disabled="!canChangeVisibility" />
           </template>
         </van-cell>
         <van-cell title="状态" v-if="isEdit">
@@ -74,10 +100,6 @@
            </template>
         </van-cell>
       </van-cell-group>
-
-      <div style="margin: 16px 16px 0;" v-if="canDelete">
-        <van-button type="danger" block @click="handleDelete">删除作品</van-button>
-      </div>
 
       <div class="preview-area" :class="work.layout">
         <div
@@ -142,21 +164,99 @@
 
     <van-dialog v-model:show="showRating" title="评分" show-cancel-button @confirm="submitRating">
       <div style="display: flex; justify-content: center; padding: 20px;">
-        <van-rate v-model="ratingScore" :count="5" size="30" />
+        <van-rate v-model="ratingScore" :count="5" allow-half size="30" />
       </div>
-      <div style="text-align: center; color: #666;">{{ ratingScore * 20 }} 分</div>
+      <div style="text-align: center; color: #666;">{{ ratingScore * 2 }} 分</div>
     </van-dialog>
+
+    <!-- My Related Work Section -->
+    <div v-if="myRelatedWorks.length > 0" class="related-works-section">
+      <div class="section-title">我的作品</div>
+      <div class="related-list">
+        <div
+          v-for="myWork in myRelatedWorks"
+          :key="myWork.id"
+          class="related-item card"
+          @click="viewRelatedWork(myWork)"
+        >
+          <div class="related-header">
+            <span class="author-name">
+              {{ myWork.userId === currentUser?.id ? '我' : (myWork.author || getUsername(myWork.userId)) }}
+              <span v-if="currentUser?.collectedWorkIds?.includes(myWork.id)" style="font-weight: normal; color: #999; font-size: 12px;">(已收藏)</span>
+            </span>
+            <span class="score" v-if="myWork.score">★ {{ myWork.score }}</span>
+          </div>
+          <div class="related-preview">
+             <div v-if="!myWork.content" style="color: #999; font-size: 12px; padding: 4px;">无内容</div>
+             <template v-else>
+               <GridDisplay
+                  v-for="(char, idx) in myWork.content.split('').slice(0, 8)"
+                  :key="idx"
+                  :size="24"
+                  :content="getMyWorkPreviewContent(myWork, idx, char)"
+                  :viewBox="getMyWorkPreviewViewBox(myWork, idx)"
+                  :type="'none'"
+                />
+                <span v-if="myWork.content.length > 8" style="align-self: flex-end; color: #999;">...</span>
+             </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Related Public Works Section -->
+    <div v-if="relatedWorks.length > 0" class="related-works-section">
+      <div class="section-title">其他人的公开作品 ({{ relatedWorks.length }})</div>
+      <div class="related-list">
+        <div
+          v-for="rWork in relatedWorks"
+          :key="rWork.id"
+          class="related-item card"
+          @click="viewRelatedWork(rWork)"
+          :class="{ 'current-viewing': rWork.id === work.id }"
+        >
+          <div class="related-header">
+            <span class="author-name">
+               {{ getUsername(rWork.userId) }}
+               <span v-if="rWork.id === work.id" style="font-weight: normal; color: #999; font-size: 12px;">(当前查看)</span>
+            </span>
+            <span class="score" v-if="rWork.score">★ {{ rWork.score }}</span>
+          </div>
+          <div class="related-preview">
+             <GridDisplay
+                v-for="(char, idx) in rWork.content.split('').slice(0, 8)"
+                :key="idx"
+                :size="24"
+                :content="getRelatedCharContent(rWork, idx, char)"
+                :viewBox="getRelatedCharViewBox(rWork, idx)"
+                :type="'none'"
+              />
+              <span v-if="rWork.content.length > 8" style="align-self: flex-end; color: #999;">...</span>
+          </div>
+          <div class="related-footer" @click.stop style="margin-top: 8px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #eee; padding-top: 8px;">
+             <span style="font-size: 12px; color: #666;">我的评分:</span>
+             <van-rate 
+                v-model="myRatings[rWork.id]" 
+                :count="5" 
+                allow-half 
+                size="14" 
+                @change="(val) => onRateWork(rWork, val)" 
+             />
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, toRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getWork, saveWork, getSamplesByChar, getSettings, saveSample, currentUser, saveRating, getMyRating, getUsername, deleteWork } from '@/services/db'
+import { getWork, saveWork, getSamplesByChar, getSettings, saveSample, currentUser, saveRating, getMyRating, getUsername, getSamplesForWork, getRelatedPublicWorks, getWorks } from '@/services/db'
 import GridDisplay from '@/components/GridDisplay.vue'
 import CharacterAdjustmentDialog from '@/components/CharacterAdjustmentDialog.vue'
 import type { Work, CharacterSample, AppSettings } from '@/types'
-import { showToast, showDialog } from 'vant'
+import { showToast } from 'vant'
 
 const route = useRoute()
 const router = useRouter()
@@ -167,6 +267,31 @@ const isPublic = ref(false)
 const isReadOnly = ref(false)
 const showRating = ref(false)
 const ratingScore = ref(0)
+const relatedWorks = ref<Work[]>([])
+const myRelatedWorks = ref<Work[]>([])
+const myRatings = ref<Record<string, number>>({})
+// Cache for related works samples to display previews
+const relatedSamplesCache = ref<Record<string, CharacterSample[]>>({})
+
+const isWorkComplete = computed(() => {
+  if (!work.value.content) return false
+  const validChars = work.value.content.split('').filter(c => /[a-zA-Z0-9\u4e00-\u9fa5]/.test(c))
+  if (validChars.length === 0) return false
+
+  return validChars.every(char => {
+    const samples = samplesCache.value[char]
+    if (!samples) return false
+    return samples.some(s => s.userId === work.value.userId)
+  })
+})
+
+const canChangeVisibility = computed(() => {
+  if (currentUser.value?.role === 'admin') return true
+  if (!isEdit.value) return true
+  // If it's already public and published, normal user cannot change it back to private
+  if (work.value.visibility === 'public' && work.value.status === 'published') return false
+  return true
+})
 
 const work = ref<Work>({
   id: crypto.randomUUID(),
@@ -199,32 +324,9 @@ const charList = computed(() => {
   return work.value.content.split('').filter(c => c.trim())
 })
 
-const canDelete = computed(() => {
-  if (!isEdit.value) return false
-  if (currentUser.value?.role === 'admin') {
-    return work.value.visibility === 'public'
-  }
-  return work.value.userId === currentUser.value?.id
-})
 
-const handleDelete = () => {
-  showDialog({
-    title: '确认删除',
-    message: '确定要删除这个作品吗？此操作无法撤销。',
-    showCancelButton: true,
-    confirmButtonColor: '#ee0a24'
-  }).then(async (action) => {
-    if (action === 'confirm') {
-      try {
-        await deleteWork(work.value.id)
-        showToast('已删除')
-        router.back()
-      } catch (e: any) {
-        showToast('删除失败: ' + e.message)
-      }
-    }
-  })
-}
+
+
 
 onMounted(async () => {
   const s = await getSettings()
@@ -240,15 +342,35 @@ onMounted(async () => {
       }
 
       // Check permissions
-      if (w.userId !== currentUser.value?.id && currentUser.value?.role !== 'admin') {
-         isReadOnly.value = true
+      if (currentUser.value?.role !== 'admin') {
+        if (w.userId !== currentUser.value?.id) {
+           isReadOnly.value = true
+        }
+        // Author can always edit their own work, even if published
+      }
+
+      if (isReadOnly.value) {
          // Load my rating
          const myScore = getMyRating(w.id, 'work')
-         if (myScore) ratingScore.value = myScore / 20
+         if (myScore) ratingScore.value = myScore / 2
+
+         // Load samples used in the work (even if private)
+         const workSamples = await getSamplesForWork(w)
+         for (const s of workSamples) {
+            if (!samplesCache.value[s.char]) {
+               samplesCache.value[s.char] = []
+            }
+            if (!samplesCache.value[s.char].some(existing => existing.id === s.id)) {
+               samplesCache.value[s.char].push(s)
+            }
+         }
       }
 
       // 预加载所有字符的样本
       preloadSamples(w.content)
+
+      // Load related public works
+      loadRelatedWorks(w)
     } else {
       showToast('作品不存在或无权访问')
       router.back()
@@ -256,9 +378,192 @@ onMounted(async () => {
   }
 })
 
+const loadRelatedWorks = async (currentWork: Work) => {
+  if (!currentWork.title) return
+  const related = await getRelatedPublicWorks(currentWork.title, currentWork.id)
+
+  // If I am viewing someone else's work (e.g. collected), add it to the related list
+  // so I can see the original author's version in the list below
+  if (currentWork.userId !== currentUser.value?.id) {
+      // Check if it's already in related (unlikely due to excludeId)
+      if (!related.some(w => w.id === currentWork.id)) {
+          related.unshift(currentWork)
+      }
+  }
+
+  relatedWorks.value = related
+
+  // Load my ratings for related works
+  for (const rWork of related) {
+      const rating = getMyRating(rWork.id, 'work')
+      if (rating) {
+          myRatings.value[rWork.id] = rating / 2
+      } else {
+          myRatings.value[rWork.id] = 0
+      }
+  }
+
+  // Find my works with same title
+  const allWorks = await getWorks()
+  const currentUserId = currentUser.value?.id
+  const collectedIds = currentUser.value?.collectedWorkIds || []
+
+  const myWorks = allWorks.filter(w => {
+      if (w.title.trim() !== currentWork.title.trim()) return false
+
+      const isMine = w.userId === currentUserId
+      const isCollected = collectedIds.includes(w.id)
+
+      return isMine || isCollected
+  })
+
+  myRelatedWorks.value = myWorks.filter(w => w.id !== currentWork.id)
+
+  // Preload samples for my works preview
+  for (const w of myRelatedWorks.value) {
+     if (w.userId === currentUserId) {
+         // My own work: load used samples
+         const samples = await getSamplesForWork(w)
+         if (!relatedSamplesCache.value[w.id]) relatedSamplesCache.value[w.id] = []
+         relatedSamplesCache.value[w.id].push(...samples)
+     } else {
+         // Collected work: load MY samples for the content
+         const chars = w.content.split('').slice(0, 8)
+         for (const char of chars) {
+             const charSamples = await getSamplesByChar(char)
+             const mySample = charSamples.find(s => s.userId === currentUserId)
+             if (mySample) {
+                 if (!relatedSamplesCache.value[w.id]) relatedSamplesCache.value[w.id] = []
+                 // Avoid duplicates
+                 if (!relatedSamplesCache.value[w.id].some(s => s.id === mySample.id)) {
+                     relatedSamplesCache.value[w.id].push(mySample)
+                 }
+             }
+         }
+     }
+  }
+
+  // Preload samples for previews (first 8 chars of each)
+  for (const rWork of related) {
+     // We need to load samples for these chars if we want to show them
+     // But getRelatedPublicWorks doesn't return samples.
+     // We can use getSamplesForWork for each related work
+     const samples = await getSamplesForWork(rWork)
+     // Store in a separate cache or the main one?
+     // Let's use a separate one to avoid polluting the main editor state
+     for (const s of samples) {
+        if (!relatedSamplesCache.value[rWork.id]) {
+           relatedSamplesCache.value[rWork.id] = []
+        }
+        // Avoid duplicates
+        if (!relatedSamplesCache.value[rWork.id].some(existing => existing.id === s.id)) {
+            relatedSamplesCache.value[rWork.id].push(s)
+        }
+     }
+  }
+}
+
+const viewRelatedWork = (rWork: Work) => {
+  // Navigate to the related work
+  // Since we are already in WorkEditor, we can just push the new ID
+  // But we need to force a reload of the component
+  router.push(`/work/${rWork.id}`).then(() => {
+     // Force reload if same component
+     window.location.reload()
+  })
+}
+const onRateWork = async (rWork: Work, value: number) => {
+  try {
+    await saveRating(rWork.id, 'work', value * 2)
+    showToast('评分成功')
+    // Update the work's average score locally if needed, or reload
+    // For now just update my rating display
+  } catch (e: any) {
+    showToast('评分失败: ' + e.message)
+  }
+}
+const getMyWorkPreviewContent = (work: Work, index: number, char: string) => {
+  // If it's my own work, respect my choices
+  if (work.userId === currentUser.value?.id) {
+      const sampleId = work.charStyles[index]
+      if (sampleId && relatedSamplesCache.value[work.id]) {
+        const sample = relatedSamplesCache.value[work.id].find(s => s.id === sampleId)
+        if (sample) return sample.svgPath
+      }
+  } else {
+      // If it's a collected work, use MY sample from cache
+      if (relatedSamplesCache.value[work.id]) {
+          // We stored my samples in the cache for this work ID
+          const sample = relatedSamplesCache.value[work.id].find(s => s.char === char && s.userId === currentUser.value?.id)
+          if (sample) return sample.svgPath
+      }
+  }
+  return char
+}
+
+const getMyWorkPreviewViewBox = (work: Work, index: number) => {
+  // If it's my own work, respect my adjustments
+  if (work.userId === currentUser.value?.id) {
+      const adjustment = work.charAdjustments?.[index]
+      if (adjustment) {
+        const { scale, offsetX, offsetY } = adjustment
+        const width = 100 / scale
+        const height = 100 / scale
+        const minX = 50 - offsetX - width / 2
+        const minY = 50 - offsetY - height / 2
+        return `${minX} ${minY} ${width} ${height}`
+      }
+
+      // Or sample viewBox
+      const char = work.content[index] // Simple access, assuming index matches
+      const sampleId = work.charStyles[index]
+      if (sampleId && relatedSamplesCache.value[work.id]) {
+        const sample = relatedSamplesCache.value[work.id].find(s => s.id === sampleId)
+        return sample?.svgViewBox
+      }
+  } else {
+      // Collected work: use MY sample viewBox
+      const char = work.content[index]
+      if (relatedSamplesCache.value[work.id]) {
+          const sample = relatedSamplesCache.value[work.id].find(s => s.char === char && s.userId === currentUser.value?.id)
+          return sample?.svgViewBox
+      }
+  }
+  return undefined
+}
+
+const getRelatedCharContent = (rWork: Work, index: number, char: string) => {
+  const sampleId = rWork.charStyles[index]
+  if (sampleId && relatedSamplesCache.value[rWork.id]) {
+    const sample = relatedSamplesCache.value[rWork.id].find(s => s.id === sampleId)
+    if (sample) return sample.svgPath
+  }
+  return char
+}
+
+const getRelatedCharViewBox = (rWork: Work, index: number) => {
+  // Check adjustments first
+  const adjustment = rWork.charAdjustments?.[index]
+  if (adjustment) {
+    const { scale, offsetX, offsetY } = adjustment
+    const width = 100 / scale
+    const height = 100 / scale
+    const minX = 50 - offsetX - width / 2
+    const minY = 50 - offsetY - height / 2
+    return `${minX} ${minY} ${width} ${height}`
+  }
+
+  const sampleId = rWork.charStyles[index]
+  if (sampleId && relatedSamplesCache.value[rWork.id]) {
+    const sample = relatedSamplesCache.value[rWork.id].find(s => s.id === sampleId)
+    if (sample) return sample.svgViewBox
+  }
+  return undefined
+}
+
 const submitRating = async () => {
   try {
-    await saveRating(work.value.id, 'work', ratingScore.value * 20)
+    await saveRating(work.value.id, 'work', ratingScore.value * 2)
     showToast('评分成功')
   } catch (e: any) {
     showToast('评分失败: ' + e.message)
@@ -282,6 +587,12 @@ const preloadSamples = async (text: string) => {
   }
 }
 
+const getUsableSamples = (char: string) => {
+  const samples = samplesCache.value[char] || []
+  if (currentUser.value?.role === 'admin') return samples
+  return samples.filter(s => s.userId === currentUser.value?.id)
+}
+
 const randomizeStyles = (text: string) => {
   // 只有在新建作品或内容变化时，且没有手动指定样式时，才进行随机分配
   // 这里简单处理：如果某个位置没有指定样式，且该字有多个样本，则随机选择一个
@@ -291,8 +602,9 @@ const randomizeStyles = (text: string) => {
     // 如果该位置已经有样式了，跳过（保留用户选择）
     if (work.value.charStyles[index]) return
 
-    const samples = samplesCache.value[char]
-    if (samples && samples.length > 1) {
+    const samples = getUsableSamples(char)
+    if (samples && samples.length > 0) {
+      // If only 1 sample, use it. If multiple, random.
       const randomIndex = Math.floor(Math.random() * samples.length)
       work.value.charStyles[index] = samples[randomIndex].id
     }
@@ -300,16 +612,18 @@ const randomizeStyles = (text: string) => {
 }
 
 const getDisplayContent = (index: number, char: string) => {
-  const sampleId = work.value.charStyles[index]
-  if (sampleId) {
-    const samples = samplesCache.value[char]
-    const sample = samples?.find(s => s.id === sampleId)
-    if (sample) return sample.svgPath
+  // 1. If it's my work, respect my choices
+  if (work.value.userId === currentUser.value?.id) {
+    const sampleId = work.value.charStyles[index]
+    if (sampleId) {
+      const samples = samplesCache.value[char]
+      const sample = samples?.find(s => s.id === sampleId)
+      if (sample) return sample.svgPath
+    }
   }
 
-  // 如果没有指定样式，尝试使用最新的一个样本（默认）
-  // 修改逻辑：如果没有指定样式，且有样本，随机选一个（实际上在preloadSamples里已经分配了，这里是兜底）
-  const samples = samplesCache.value[char]
+  // 2. Otherwise (not my work, or no style selected), find MY best sample
+  const samples = getUsableSamples(char)
   if (samples && samples.length > 0) {
     return samples[0].svgPath
   }
@@ -319,42 +633,49 @@ const getDisplayContent = (index: number, char: string) => {
 
 const getDisplayViewBox = (index: number) => {
   // 1. 优先使用作品特定的调整
-  const adjustment = work.value.charAdjustments?.[index]
-  if (adjustment) {
-    const { scale, offsetX, offsetY } = adjustment
-    const width = 100 / scale
-    const height = 100 / scale
-    const minX = 50 - offsetX - width / 2
-    const minY = 50 - offsetY - height / 2
-    return `${minX} ${minY} ${width} ${height}`
-  }
-
-  const char = charList.value[index]
-  const sampleId = work.value.charStyles[index]
-  let sample: CharacterSample | undefined
-
-  if (sampleId) {
-    sample = samplesCache.value[char]?.find(s => s.id === sampleId)
-  } else {
-    // 兜底
-    const samples = samplesCache.value[char]
-    if (samples && samples.length > 0) {
-      sample = samples[0]
+  // Only use adjustments if it's my work (since adjustments are visual tweaks)
+  // Or should we apply author's adjustments to my characters? Probably not, as adjustments are often specific to the stroke.
+  if (work.value.userId === currentUser.value?.id) {
+    const adjustment = work.value.charAdjustments?.[index]
+    if (adjustment) {
+      const { scale, offsetX, offsetY } = adjustment
+      const width = 100 / scale
+      const height = 100 / scale
+      const minX = 50 - offsetX - width / 2
+      const minY = 50 - offsetY - height / 2
+      return `${minX} ${minY} ${width} ${height}`
     }
   }
 
-  return sample?.svgViewBox
+  const char = charList.value[index]
+
+  // If it's my work, check selected style
+  if (work.value.userId === currentUser.value?.id) {
+    const sampleId = work.value.charStyles[index]
+    if (sampleId) {
+      const sample = samplesCache.value[char]?.find(s => s.id === sampleId)
+      return sample?.svgViewBox
+    }
+  }
+
+  // Fallback to my best sample
+  const samples = getUsableSamples(char)
+  if (samples && samples.length > 0) {
+    return samples[0].svgViewBox
+  }
+
+  return undefined
 }
 
 const hasSample = (char: string) => {
-  return samplesCache.value[char]?.length > 0
+  return getUsableSamples(char).length > 0
 }
 
 // 选字逻辑
 const showSelector = ref(false)
 const selectedIndex = ref(-1)
 const selectedChar = ref('')
-const currentSamples = computed(() => samplesCache.value[selectedChar.value] || [])
+const currentSamples = computed(() => getUsableSamples(selectedChar.value))
 
 // 调整相关
 const showAdjustment = ref(false)
@@ -381,7 +702,7 @@ const openAdjustment = () => {
       sample = samplesCache.value[selectedChar.value]?.find(s => s.id === sampleId)
     } else {
       // 兜底：使用默认样本
-      const samples = samplesCache.value[selectedChar.value]
+      const samples = getUsableSamples(selectedChar.value)
       if (samples && samples.length > 0) {
         sample = samples[0]
       }
@@ -419,7 +740,7 @@ const saveAdjustment = async (data: { scale: number, offsetX: number, offsetY: n
   if (sampleId) {
     sample = samplesCache.value[selectedChar.value]?.find(s => s.id === sampleId)
   } else {
-    const samples = samplesCache.value[selectedChar.value]
+    const samples = getUsableSamples(selectedChar.value)
     if (samples && samples.length > 0) {
       sample = samples[0]
     }
@@ -495,7 +816,8 @@ const save = async () => {
   try {
     await saveWork(toRaw(work.value))
     showToast('保存成功')
-    router.back()
+    // Use replace to avoid history stack issues, or push to gallery
+    router.replace('/gallery')
   } catch (e: any) {
     showToast('保存失败: ' + e.message)
     console.error(e)
@@ -581,5 +903,58 @@ const save = async () => {
 .empty-samples {
   color: #999;
   padding: 20px;
+}
+
+.related-works-section {
+  margin-top: 24px;
+  padding-bottom: 40px;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: bold;
+  margin: 0 16px 12px;
+  padding-left: 8px;
+  border-left: 4px solid var(--primary-color);
+}
+
+.related-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 16px;
+}
+
+.related-item {
+  padding: 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.related-item.current-viewing {
+  border-color: var(--primary-color);
+  background-color: #f0f9ff;
+}
+
+.related-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.author-name {
+  font-weight: bold;
+  color: #333;
+}
+
+.score {
+  color: #f7b500;
+}
+
+.related-preview {
+  display: flex;
+  gap: 4px;
+  overflow: hidden;
 }
 </style>

@@ -56,6 +56,8 @@ export async function processImage(
   const binary = new cv.Mat()
   const contours = new cv.MatVector()
   const hierarchy = new cv.Mat()
+  let morph: any = null
+  let kernel: any = null
 
   try {
     // 1. 灰度化
@@ -69,13 +71,13 @@ export async function processImage(
     // 3. 膨胀处理：连接断开的笔画
     // 汉字往往由不连通的笔画组成，直接查找轮廓会将一个字识别为多个部分
     // 通过膨胀操作，让笔画粘连在一起，形成一个整体区域
-    const morph = new cv.Mat()
+    morph = new cv.Mat()
     binary.copyTo(morph)
 
     // 动态计算核大小：基于图像短边的 1/80，最小 3px，最大 30px
     // 稍微大一点的核可以更好地连接左右结构的字
     const kSize = Math.min(30, Math.max(3, Math.floor(Math.min(src.cols, src.rows) / 80)))
-    const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(kSize, kSize))
+    kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(kSize, kSize))
 
     cv.dilate(morph, morph, kernel)
 
@@ -158,7 +160,7 @@ export async function processImage(
     binary.delete()
     contours.delete()
     hierarchy.delete()
-    if (typeof morph !== 'undefined') morph.delete()
-    if (typeof kernel !== 'undefined') kernel.delete()
+    if (morph) morph.delete()
+    if (kernel) kernel.delete()
   }
 }

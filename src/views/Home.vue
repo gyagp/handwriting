@@ -48,10 +48,10 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { getCollectedStatsMap, getSettings, type CharacterStats, currentUser } from '@/services/db'
+import { getCollectedStatsMap, getSettings, currentUser } from '@/services/db'
 import { gb2312AllChars, getPinyin, getGB2312Code, getStrokes, getRadical, punctuationChars } from '@/data/gb2312-generator'
 import CharacterCard from '@/components/CharacterCard.vue'
-import type { CharacterInfo, AppSettings } from '@/types'
+import type { CharacterInfo, AppSettings, CharacterStats } from '@/types'
 
 const router = useRouter()
 const searchText = ref('')

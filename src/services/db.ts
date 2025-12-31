@@ -1,5 +1,5 @@
-import type { CharacterCollection, CharacterSample, AppSettings, Work, User, Visibility, Rating, WorkStatus } from '@/types'
-import { ref, computed } from 'vue'
+import type { CharacterSample, AppSettings, Work, User, Rating, CharacterStats } from '@/types'
+import { ref } from 'vue'
 import { generateGB2312Level1Chars, generateGB2312Level2Chars } from '@/data/gb2312-generator'
 
 // In-memory store
@@ -111,7 +111,7 @@ export async function syncToFile() {
 
 export async function loadFromFile() {
   try {
-    const res = await fetch('/api/data')
+    const res = await fetch('/api/data?t=' + Date.now())
     if (!res.ok) return
 
     const data = await res.json()
@@ -122,6 +122,31 @@ export async function loadFromFile() {
     store.ratings = data.ratings || []
     store.settings = data.settings || null
 
+    // Migration: Convert 100-point scale to 10-point scale
+    let migrationNeeded = false
+    store.ratings.forEach(r => {
+      if (r.score > 10) {
+        r.score = r.score / 10
+        migrationNeeded = true
+      }
+    })
+    store.samples.forEach(s => {
+      if (s.score && s.score > 10) {
+        s.score = s.score / 10
+        migrationNeeded = true
+      }
+    })
+    store.works.forEach(w => {
+      if (w.score && w.score > 10) {
+        w.score = w.score / 10
+        migrationNeeded = true
+      }
+    })
+
+    if (migrationNeeded) {
+      await syncToFile()
+    }
+
   } catch (e) {
     console.error('Load from file failed:', e)
   }
@@ -131,8 +156,6 @@ export async function loadFromFile() {
 export async function initSettings() {
   // 尝试从文件加载
   await loadFromFile()
-
-  let dataChanged = false
 
   // Ensure admin user exists
   let adminUser = store.users.find(u => u.username === 'admin')
@@ -145,15 +168,12 @@ export async function initSettings() {
       createdAt: Date.now()
     }
     store.users.push(adminUser)
-    dataChanged = true
   } else {
     if (adminUser.role !== 'admin') {
       adminUser.role = 'admin'
-      dataChanged = true
     }
     if (adminUser.password !== 'admin12345') {
       adminUser.password = 'admin12345'
-      dataChanged = true
     }
   }
 
@@ -168,15 +188,12 @@ export async function initSettings() {
       createdAt: Date.now()
     }
     store.users.push(gyagpUser)
-    dataChanged = true
   } else {
     if (gyagpUser.role !== 'user') {
       gyagpUser.role = 'user'
-      dataChanged = true
     }
     if (gyagpUser.password !== 'gy12345') {
       gyagpUser.password = 'gy12345'
-      dataChanged = true
     }
   }
 
@@ -199,7 +216,6 @@ export async function initSettings() {
       if (!s.userId || (adminUser && s.userId === adminUser.id)) {
           s.userId = gyagpUser!.id
           if (!s.visibility) s.visibility = 'private'
-          dataChanged = true
       }
   })
   store.works.forEach(w => {
@@ -207,11 +223,9 @@ export async function initSettings() {
           w.userId = gyagpUser!.id
           if (!w.visibility) w.visibility = 'public'
           if (!w.status) w.status = 'published'
-          dataChanged = true
       }
       if (!w.status) {
         w.status = w.visibility === 'public' ? 'published' : 'draft'
-        dataChanged = true
       }
   })
 
@@ -223,15 +237,10 @@ export async function initSettings() {
       gridSize: 100,
       autoRecognize: true,
       compressionLevel: 5,
-      theme: 'light'
+      theme: 'light',
+      defaultVisibility: 'private'
     } as AppSettings
-    dataChanged = true
   }
-
-  if (dataChanged) {
-    await syncToFile()
-  }
-
   await initDefaultWorks()
 }
 
@@ -320,7 +329,7 @@ export async function initDefaultWorks() {
 
 export async function saveRating(targetId: string, targetType: 'sample' | 'work', score: number) {
   if (!currentUser.value) throw new Error('Must be logged in')
-  if (score < 0 || score > 100) throw new Error('Score must be 0-100')
+  if (score < 0 || score > 10) throw new Error('Score must be 0-10')
 
   const existingIndex = store.ratings.findIndex(r =>
     r.userId === currentUser.value!.id &&
@@ -352,7 +361,8 @@ function updateAverageScore(targetId: string, targetType: 'sample' | 'work') {
   if (ratings.length === 0) return
 
   const total = ratings.reduce((sum, r) => sum + r.score, 0)
-  const avg = Math.round(total / ratings.length)
+  // Keep 1 decimal place
+  const avg = Math.round((total / ratings.length) * 10) / 10
 
   if (targetType === 'sample') {
     const sample = store.samples.find(s => s.id === targetId)
@@ -415,24 +425,80 @@ export async function saveSample(sample: CharacterSample) {
       store.samples[index] = sample
     } else {
       sample.userId = currentUser.value.id
-      if (!sample.visibility) sample.visibility = 'private'
+      if (!sample.visibility) {
+        // Use default visibility from settings if available
+        sample.visibility = store.settings?.defaultVisibility || 'private'
+      }
       store.samples.push(sample)
     }
   }
   await syncToFile()
 }
 
+export async function setAllVisibility(visibility: 'public' | 'private') {
+  if (!currentUser.value) throw new Error('Must be logged in')
+
+  let changed = false
+
+  // Update samples
+  store.samples.forEach(s => {
+    if (s.userId === currentUser.value!.id && s.visibility !== visibility) {
+      s.visibility = visibility
+      changed = true
+    }
+  })
+
+  // Update works
+  store.works.forEach(w => {
+    if (w.userId === currentUser.value!.id) {
+      // Skip if trying to make private but it's already published public (restriction)
+      if (visibility === 'private' && w.visibility === 'public' && w.status === 'published') {
+        return
+      }
+
+      if (w.visibility !== visibility) {
+        w.visibility = visibility
+        // If making public, set to pending if not admin
+        if (visibility === 'public' && w.status !== 'published') {
+           w.status = currentUser.value!.role === 'admin' ? 'published' : 'pending'
+        }
+        // If making private, set to published (active)
+        if (visibility === 'private') {
+           w.status = 'published'
+        }
+        changed = true
+      }
+    }
+  })
+
+  if (changed) {
+    await syncToFile()
+  }
+}
+
 // 获取某个字的所有样本
 export async function getSamplesByChar(char: string): Promise<CharacterSample[]> {
+  // Ensure we have the latest data from other users
+  await loadFromFile()
+
   const currentUserId = currentUser.value?.id
+  const isAdmin = currentUser.value?.role === 'admin'
+
   return store.samples
     .filter(s => s.char === char)
-    .filter(s => s.visibility === 'public' || s.userId === currentUserId)
-    .sort((a, b) => (b.score || 0) - (a.score || 0)) // Sort by score desc
+    .filter(s => s.visibility === 'public' || s.userId === currentUserId || isAdmin)
+    .sort((a, b) => {
+      // Current user's samples always come first
+      if (a.userId === currentUserId && b.userId !== currentUserId) return -1
+      if (b.userId === currentUserId && a.userId !== currentUserId) return 1
+      // Then sort by score desc
+      return (b.score || 0) - (a.score || 0)
+    })
 }
 
 // 获取所有已收集的字
 export async function getCollectedChars(): Promise<string[]> {
+  await loadFromFile()
   const currentUserId = currentUser.value?.id
   const chars = new Set(store.samples
     .filter(s => s.visibility === 'public' || s.userId === currentUserId)
@@ -442,10 +508,12 @@ export async function getCollectedChars(): Promise<string[]> {
 
 // 获取所有已收集的字及其最新样本
 export async function getCollectedSamplesMap(): Promise<Record<string, CharacterSample>> {
+  await loadFromFile()
   const map: Record<string, CharacterSample> = {}
   const currentUserId = currentUser.value?.id
 
-  const visibleSamples = store.samples.filter(s => s.visibility === 'public' || s.userId === currentUserId)
+  // Only show my own samples, regardless of admin status or public visibility of others
+  const visibleSamples = store.samples.filter(s => s.userId === currentUserId)
 
   // Sort by score ascending (so last one overwrites)
   visibleSamples.sort((a, b) => {
@@ -462,19 +530,49 @@ export async function getCollectedSamplesMap(): Promise<Record<string, Character
   return map
 }
 
-export interface CharacterStats {
-  sample: CharacterSample
-  totalCount: number
-  adjustedCount: number
+export async function getSamplesForWork(work: Work): Promise<CharacterSample[]> {
+  await loadFromFile()
+  const sampleIds = new Set(Object.values(work.charStyles))
+  if (sampleIds.size === 0) return []
+
+  // Return samples that match the IDs, regardless of visibility
+  // Because they are part of a visible work
+  return store.samples.filter(s => sampleIds.has(s.id))
+}
+
+export async function getWorkStats(works: Work[]): Promise<Record<string, number>> {
+  await loadFromFile()
+  const stats: Record<string, number> = {}
+
+  // Build lookup
+  const userCharSet = new Set<string>()
+  for (const s of store.samples) {
+    userCharSet.add(`${s.userId}_${s.char}`)
+  }
+
+  for (const work of works) {
+    let count = 0
+    for (const char of work.content) {
+      if (userCharSet.has(`${work.userId}_${char}`)) {
+        count++
+      }
+    }
+    stats[work.id] = count
+  }
+  return stats
 }
 
 export async function getCollectedStatsMap(): Promise<Record<string, CharacterStats>> {
   const map: Record<string, CharacterStats> = {}
   const currentUserId = currentUser.value?.id
+  const isAdmin = currentUser.value?.role === 'admin'
 
-  const visibleSamples = store.samples.filter(s => s.visibility === 'public' || s.userId === currentUserId)
+  let targetSamples = store.samples
+  if (!isAdmin) {
+    targetSamples = store.samples.filter(s => s.userId === currentUserId)
+  }
 
-  for (const s of visibleSamples) {
+  for (const s of targetSamples) {
     if (!map[s.char]) {
       map[s.char] = {
         sample: s,
@@ -510,45 +608,71 @@ export async function saveWork(work: Work) {
   if (!currentUser.value) throw new Error('Must be logged in')
 
   work.updatedAt = Date.now()
-  const index = store.works.findIndex(w => w.id === work.id)
 
-  // If creating new work or updating own work or admin
+  // Determine status logic
   if (currentUser.value.role === 'admin') {
-     if (index !== -1) {
-       const existingWork = store.works[index]
-       if (existingWork.visibility !== 'public' && existingWork.userId !== currentUser.value.id) {
-          throw new Error('Admin can only manage public data or own data')
-       }
-     }
      // Admin can publish directly
-     if (work.visibility === 'public') work.status = 'published'
+     if (work.visibility === 'public') {
+        work.status = 'published'
+     }
   } else {
      // Normal user
-     if (index === -1 || store.works[index].userId === currentUser.value.id) {
-        if (work.visibility === 'public') {
-           // Public works always need approval when created or modified by normal user
-           work.status = 'pending'
-        } else {
-           // Private works are automatically "published" (valid/active)
-           work.status = 'published'
-        }
+     if (work.visibility === 'public') {
+        // Auto-publish for now to simplify
+        work.status = 'published'
+     } else {
+        // Private works are automatically "published" (valid/active)
+        work.status = 'published'
      }
   }
 
+  const index = store.works.findIndex(w => w.id === work.id)
+
   if (index >= 0) {
+    // Update existing
+    const existingWork = store.works[index]
+
     if (currentUser.value.role === 'admin') {
-       // Already checked visibility above
+       // Admin can edit any public work or own work
+       if (existingWork.visibility !== 'public' && existingWork.userId !== currentUser.value.id) {
+          throw new Error('Admin can only manage public data or own data')
+       }
        store.works[index] = work
     } else {
-       if (store.works[index].userId !== currentUser.value.id) {
+       // Normal user can only edit own work
+       if (existingWork.userId !== currentUser.value.id) {
          throw new Error('Permission denied')
        }
+
+       // Prevent changing public published work to private
+       if (existingWork.visibility === 'public' && existingWork.status === 'published' && work.visibility === 'private') {
+          throw new Error('已发布的作品不能转为私有')
+       }
+
        store.works[index] = work
     }
   } else {
+    // Create new
     work.userId = currentUser.value.id
-    if (!work.visibility) work.visibility = 'private'
-    if (!work.status) work.status = work.visibility === 'public' ? 'pending' : 'published'
+    if (!work.visibility) {
+      work.visibility = store.settings?.defaultVisibility || 'private'
+    }
+
+    // Re-evaluate status based on the assigned visibility
+    if (currentUser.value.role !== 'admin') {
+       if (work.visibility === 'public') {
+          work.status = 'pending'
+       } else {
+          work.status = 'published'
+       }
+    } else {
+       if (work.visibility === 'public') {
+          work.status = 'published'
+       }
+    }
+
+    // Status is already set above
+    if (!work.status) work.status = 'published' // Fallback
     if (!work.createdAt) work.createdAt = Date.now()
     store.works.push(work)
   }
@@ -568,13 +692,44 @@ export async function approveWork(workId: string, approved: boolean) {
 
 export async function getWorks(): Promise<Work[]> {
   const currentUserId = currentUser.value?.id
+  const isAdmin = currentUser.value?.role === 'admin'
+
   return [...store.works]
-    .filter(w =>
-      (w.visibility === 'public' && w.status === 'published') ||
-      w.userId === currentUserId ||
-      (currentUser.value?.role === 'admin' && w.status === 'pending') // Admin sees pending
-    )
+    .filter(w => {
+      // 1. Public works are visible to everyone
+      if (w.visibility === 'public') return true
+
+      // 2. Own works are visible to the user
+      if (w.userId === currentUserId) return true
+
+      // 3. Admin sees pending works
+      if (isAdmin && w.status === 'pending') return true
+
+      return false
+    })
     .sort((a, b) => (b.score || 0) - (a.score || 0)) // Sort by score
+}
+
+export async function getRelatedPublicWorks(title: string, excludeId?: string): Promise<Work[]> {
+  await loadFromFile()
+  const currentUserId = currentUser.value?.id
+
+  // Get stats for completeness check
+  // const stats = await getWorkStats(store.works)
+
+  return store.works.filter(w => {
+    if (w.id === excludeId) return false
+    if (w.title.trim() !== title.trim()) return false
+    if (w.visibility !== 'public') return false
+    if (w.userId === currentUserId) return false // Exclude my own works (they are in My Works)
+
+    // Check completeness (ignore punctuation)
+    // Only count Chinese characters, letters, and numbers
+    // const validChars = w.content.split('').filter(c => /[a-zA-Z0-9\u4e00-\u9fa5]/.test(c)).length
+    // const writtenCount = stats[w.id] || 0
+    // return writtenCount >= validChars && validChars > 0
+    return true
+  }).sort((a, b) => (b.score || 0) - (a.score || 0))
 }
 
 export async function getWork(id: string): Promise<Work | undefined> {
@@ -586,7 +741,7 @@ export async function getWork(id: string): Promise<Work | undefined> {
 
   if (work.userId === currentUserId) return work
   if (isAdmin) return work
-  if (work.visibility === 'public' && work.status === 'published') return work
+  if (work.visibility === 'public') return work
 
   return undefined
 }

@@ -16,7 +16,17 @@
       />
       <div class="actions" v-if="currentSample">
         <van-button size="small" icon="edit" @click="openEdit" v-if="canEdit">调整</van-button>
-        <van-button size="small" icon="star-o" @click="openRating" v-else>评分</van-button>
+        <van-button
+          size="small"
+          icon="star-o"
+          @click="openRating"
+          v-if="!canEdit"
+        >
+          {{ myCurrentRating ? `评分 (${myCurrentRating})` : '评分' }}
+        </van-button>
+      </div>
+      <div class="sample-info-extra" v-if="currentSample && !canEdit">
+        书写者: {{ getUsername(currentSample.userId) }}
       </div>
     </div>
 
@@ -36,27 +46,54 @@
     </div>
 
     <div class="samples-section">
-      <h3>收集 ({{ samples.length }})</h3>
-      <div class="samples-list">
-        <div
-          v-for="sample in samples"
-          :key="sample.id"
-          class="sample-item"
-          :class="{ active: currentSample?.id === sample.id }"
-          @click="currentSample = sample"
-        >
-          <GridDisplay :size="60" :content="sample.svgPath" :viewBox="sample.svgViewBox" />
-          <div class="sample-score" v-if="sample.score">{{ sample.score }}</div>
-          <van-icon
-            name="cross"
-            class="delete-btn"
-            @click.stop="handleDelete(sample)"
-            v-if="canDelete(sample)"
-          />
-        </div>
+      <div v-if="mySamples.length > 0 || currentUser?.role !== 'admin'">
+        <h3>我的书写 ({{ mySamples.length }})</h3>
+        <div class="samples-list">
+          <div
+            v-for="sample in mySamples"
+            :key="sample.id"
+            class="sample-item"
+            :class="{ active: currentSample?.id === sample.id }"
+            @click="currentSample = sample"
+          >
+            <GridDisplay :size="60" :content="sample.svgPath" :viewBox="sample.svgViewBox" />
+            <div class="sample-score" v-if="sample.score">{{ sample.score }}</div>
+            <van-icon name="lock" v-if="sample.visibility === 'private'" class="private-icon" />
+            <van-icon
+              name="cross"
+              class="delete-btn"
+              @click.stop="handleDelete(sample)"
+              v-if="canDelete(sample)"
+            />
+          </div>
 
-        <div class="add-btn" @click="$router.push('/capture')" v-if="currentUser?.role !== 'admin'">
-          <van-icon name="plus" />
+          <div class="add-btn" @click="$router.push('/capture')" v-if="currentUser?.role !== 'admin'">
+            <van-icon name="plus" />
+          </div>
+        </div>
+      </div>
+
+      <div v-if="otherSamples.length > 0" style="margin-top: 24px;">
+        <h3>公开书写 ({{ otherSamples.length }})</h3>
+        <div class="samples-list">
+          <div
+            v-for="sample in otherSamples"
+            :key="sample.id"
+            class="sample-item"
+            :class="{ active: currentSample?.id === sample.id }"
+            @click="currentSample = sample"
+          >
+            <GridDisplay :size="60" :content="sample.svgPath" :viewBox="sample.svgViewBox" />
+            <div class="sample-score" v-if="sample.score">{{ sample.score }}</div>
+            <div class="sample-author">{{ getUsername(sample.userId) }}</div>
+            <van-icon name="lock" v-if="sample.visibility === 'private'" class="private-icon" />
+            <van-icon
+              name="cross"
+              class="delete-btn"
+              @click.stop="handleDelete(sample)"
+              v-if="canDelete(sample)"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -73,17 +110,17 @@
 
     <van-dialog v-model:show="showRatingDialog" title="评分" show-cancel-button @confirm="submitRating">
       <div style="display: flex; justify-content: center; padding: 20px;">
-        <van-rate v-model="ratingScore" :count="5" size="30" />
+        <van-rate v-model="ratingScore" :count="5" allow-half size="30" />
       </div>
-      <div style="text-align: center; color: #666;">{{ ratingScore * 20 }} 分</div>
+      <div style="text-align: center; color: #666;">{{ ratingScore * 2 }} 分</div>
     </van-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { getSamplesByChar, deleteSample, getSettings, saveSample, saveRating, getMyRating, currentUser } from '@/services/db'
-import { gb2312Level1Chars, getPinyin, getRadical, getStrokes, getGB2312Code } from '@/data/gb2312-generator'
+import { getSamplesByChar, deleteSample, getSettings, saveSample, saveRating, getMyRating, currentUser, getUsername } from '@/services/db'
+import { getPinyin, getRadical, getStrokes, getGB2312Code } from '@/data/gb2312-generator'
 import GridDisplay from '@/components/GridDisplay.vue'
 import CharacterAdjustmentDialog from '@/components/CharacterAdjustmentDialog.vue'
 import type { CharacterSample, AppSettings } from '@/types'
@@ -96,6 +133,10 @@ const props = defineProps<{
 
 const samples = ref<CharacterSample[]>([])
 const currentSample = ref<CharacterSample | null>(null)
+
+const mySamples = computed(() => samples.value.filter(s => s.userId === currentUser.value?.id))
+const otherSamples = computed(() => samples.value.filter(s => s.userId !== currentUser.value?.id))
+
 const settings = ref<AppSettings>({
   gridType: 'mi',
   gridSize: 100,
@@ -115,6 +156,14 @@ const editForm = ref({
 const showRatingDialog = ref(false)
 const ratingScore = ref(0)
 
+const myCurrentRating = computed(() => {
+  if (!currentSample.value) return 0
+  // Force reactivity by depending on showRatingDialog (hacky but works if we reload)
+  // Better: getMyRating should be reactive if store is reactive.
+  // Let's assume getMyRating is reactive because it accesses store.ratings
+  return getMyRating(currentSample.value.id, 'sample')
+})
+
 const canEdit = computed(() => {
   if (!currentSample.value) return false
   if (currentUser.value?.role === 'admin') {
@@ -130,13 +179,13 @@ const canDelete = (sample: CharacterSample) => {
 const openRating = () => {
   if (!currentSample.value) return
   const myRating = getMyRating(currentSample.value.id, 'sample')
-  ratingScore.value = myRating ? myRating / 20 : 0
+  ratingScore.value = myRating ? myRating / 2 : 0
   showRatingDialog.value = true
 }
 
 const submitRating = async () => {
   if (!currentSample.value) return
-  await saveRating(currentSample.value.id, 'sample', ratingScore.value * 20)
+  await saveRating(currentSample.value.id, 'sample', ratingScore.value * 2)
   showToast('评分成功')
   await loadSamples()
 }
@@ -290,6 +339,14 @@ const handleDelete = (sample: CharacterSample) => {
   border-color: var(--primary-color);
 }
 
+.private-icon {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  font-size: 12px;
+  color: #999;
+}
+
 .delete-btn {
   position: absolute;
   top: -6px;
@@ -312,6 +369,21 @@ const handleDelete = (sample: CharacterSample) => {
   border-radius: 2px 0 0 0;
 }
 
+.sample-author {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: rgba(0,0,0,0.5);
+  color: #fff;
+  font-size: 10px;
+  padding: 1px 3px;
+  border-radius: 0 0 2px 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .add-btn {
   width: 64px;
   height: 64px;
@@ -328,5 +400,12 @@ const handleDelete = (sample: CharacterSample) => {
   margin-top: 16px;
   display: flex;
   justify-content: center;
+}
+
+.sample-info-extra {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 12px;
+  color: #999;
 }
 </style>

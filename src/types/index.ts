@@ -75,6 +75,7 @@ export interface AppSettings {
   autoRecognize: boolean    // 自动OCR识别
   compressionLevel: number  // 压缩级别 0-9
   theme: 'light' | 'dark'   // 主题
+  defaultVisibility?: 'public' | 'private' // 默认可见性 (作品和字形)
 }
 
 // 书法作品
@@ -93,7 +94,13 @@ export interface Work {
   score?: number            // 公众评分平均分 0-100
   createdAt: number
   updatedAt: number
-  authorDeleted?: boolean   // 作者是否已删除(仅对公共作品有效，删除后仅从作者列表移除)
+  authorDeleted?: boolean   // 作者是否已删除(仅对公开作品有效，删除后仅从作者列表移除)
+}
+
+export interface CharacterStats {
+  sample: CharacterSample
+  totalCount: number
+  adjustedCount: number
 }
 
 // 导出数据格式

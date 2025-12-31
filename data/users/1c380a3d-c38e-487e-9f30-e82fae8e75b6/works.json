@@ -50,7 +50,8 @@
     },
     "userId": "1c380a3d-c38e-487e-9f30-e82fae8e75b6",
     "visibility": "public",
-    "status": "published"
+    "status": "published",
+    "score": 8
   },
   {
     "id": "03fc9d4d-6934-4af9-8953-462f54676133",
@@ -206,7 +207,7 @@
   {
     "id": "b41c35a7-692d-4152-8cf6-b4d662f6f76b",
     "userId": "1c380a3d-c38e-487e-9f30-e82fae8e75b6",
-    "visibility": "private",
+    "visibility": "public",
     "status": "published",
     "title": "私有",
     "author": "私有",
@@ -217,5 +218,35 @@
     "gridType": "mi",
     "createdAt": 1767111772934,
     "updatedAt": 1767111780824
+  },
+  {
+    "id": "287a8efd-5a5d-44a2-9d73-3e78072bae87",
+    "userId": "1c380a3d-c38e-487e-9f30-e82fae8e75b6",
+    "visibility": "public",
+    "status": "pending",
+    "title": "from gyagp",
+    "author": "gyagp测试",
+    "content": "gyagp测试",
+    "charStyles": {},
+    "charAdjustments": {},
+    "layout": "horizontal",
+    "gridType": "mi",
+    "createdAt": 1767185753290,
+    "updatedAt": 1767186426007
+  },
+  {
+    "id": "c69c16a0-8888-46a6-9266-b2a43279abb5",
+    "userId": "1c380a3d-c38e-487e-9f30-e82fae8e75b6",
+    "visibility": "public",
+    "status": "published",
+    "title": "from gyagp 2",
+    "author": "测试",
+    "content": "测试",
+    "charStyles": {},
+    "charAdjustments": {},
+    "layout": "horizontal",
+    "gridType": "mi",
+    "createdAt": 1767186308238,
+    "updatedAt": 1767186354982
   }
 ]

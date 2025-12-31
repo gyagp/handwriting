@@ -14,15 +14,48 @@
       "password": "admin12345",
       "role": "admin",
       "createdAt": 1767105844950
+    },
+    {
+      "id": "65a597e7-d1cb-4dfd-800f-baec732e543d",
+      "username": "test",
+      "password": "test12345",
+      "role": "user",
+      "createdAt": 1767185916501,
+      "collectedWorkIds": [
+        "0107dd3e-6f33-4ff4-b28e-5bc91cfd336d"
+      ]
     }
   ],
-  "ratings": [],
+  "ratings": [
+    {
+      "userId": "1c380a3d-c38e-487e-9f30-e82fae8e75b6",
+      "targetId": "3d487152-4522-4f3b-95c7-0fb1bd74d41a",
+      "targetType": "sample",
+      "score": 6,
+      "createdAt": 1767188769716
+    },
+    {
+      "userId": "65a597e7-d1cb-4dfd-800f-baec732e543d",
+      "targetId": "a44afcb6-5fee-403f-8eb0-3f0bbe955a20",
+      "targetType": "sample",
+      "score": 8,
+      "createdAt": 1767189065228
+    },
+    {
+      "userId": "65a597e7-d1cb-4dfd-800f-baec732e543d",
+      "targetId": "0107dd3e-6f33-4ff4-b28e-5bc91cfd336d",
+      "targetType": "work",
+      "score": 8,
+      "createdAt": 1767194633921
+    }
+  ],
   "settings": {
     "id": 1,
     "gridType": "hui",
     "gridSize": 100,
     "autoRecognize": true,
     "compressionLevel": 5,
-    "theme": "light"
+    "theme": "light",
+    "defaultVisibility": "public"
   }
 }

@@ -1,7 +1,7 @@
 <template>
   <div
     class="character-card"
-    :class="{ 'is-complete': collected && adjustedCount === totalCount && totalCount > 0 }"
+    :class="{ 'is-complete': collected && (adjustedCount || 0) === (totalCount || 0) && (totalCount || 0) > 0 }"
     @click="$emit('click')"
   >
     <div class="card-header">
@@ -28,7 +28,7 @@
         <span
           v-if="collected && totalCount"
           class="count-badge"
-          :class="{ 'fully-adjusted': adjustedCount === totalCount && totalCount > 0 }"
+          :class="{ 'fully-adjusted': (adjustedCount || 0) === totalCount && totalCount > 0 }"
         >
           {{ adjustedCount || 0 }}/{{ totalCount }}
         </span>

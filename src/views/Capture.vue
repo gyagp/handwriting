@@ -71,7 +71,7 @@
       </van-sticky>
 
       <div class="edit-list">
-        <div v-for="(item, index) in selectedItems" :key="item.id" class="edit-item card">
+        <div v-for="item in selectedItems" :key="item.id" class="edit-item card">
           <div class="preview">
             <GridDisplay :size="80" :content="item.svgPath" :viewBox="item.svgViewBox" />
           </div>
@@ -98,7 +98,7 @@ import ImageCapture from '@/components/ImageCapture.vue'
 import GridDisplay from '@/components/GridDisplay.vue'
 import { processImage } from '@/services/opencv'
 import { vectorizeImage } from '@/services/vectorize'
-import { saveSample } from '@/services/db'
+import { saveSample, currentUser } from '@/services/db'
 import type { ExtractedCharacter, CharacterSample } from '@/types'
 import { showToast } from 'vant'
 
@@ -189,6 +189,8 @@ const saveSelected = async () => {
         items.push({
           tempId: char.id,
           id: crypto.randomUUID(),
+          userId: currentUser.value?.id || '',
+          visibility: 'private',
           char: '', // 待用户输入
           svgPath: path,
           svgViewBox: viewBox,

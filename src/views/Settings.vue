@@ -12,6 +12,17 @@
       <van-cell title="管理用户" is-link @click="showUserList = true" />
     </van-cell-group>
 
+    <van-cell-group title="隐私设置">
+      <van-cell title="字集和作品集可见">
+        <template #right-icon>
+          <van-radio-group v-model="settings.defaultVisibility" direction="horizontal" @change="handleVisibilityChange">
+            <van-radio name="public">公开</van-radio>
+            <van-radio name="private">私有</van-radio>
+          </van-radio-group>
+        </template>
+      </van-cell>
+    </van-cell-group>
+
     <van-cell-group title="显示设置">
       <van-cell title="默认格线">
         <template #right-icon>
@@ -58,7 +69,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch, reactive } from 'vue'
-import { getSettings, saveSettings, clearAllData, currentUser, loginUser, registerUser, getAllUsers, updateUser, logoutUser } from '@/services/db'
+import { getSettings, saveSettings, clearAllData, currentUser, loginUser, registerUser, getAllUsers, updateUser, logoutUser, setAllVisibility } from '@/services/db'
 import type { AppSettings, User } from '@/types'
 import { showDialog, showToast } from 'vant'
 import { useRouter } from 'vue-router'
@@ -70,8 +81,14 @@ const settings = ref<AppSettings>({
   gridSize: 100,
   autoRecognize: true,
   compressionLevel: 5,
-  theme: 'light'
+  theme: 'light',
+  defaultVisibility: 'private'
 })
+
+const handleVisibilityChange = async (val: 'public' | 'private') => {
+  await setAllVisibility(val)
+  showToast('已应用到所有历史数据')
+}
 
 const showLoginDialog = ref(false)
 const loginForm = reactive({
@@ -154,7 +171,10 @@ const handleRegister = async () => {
 onMounted(async () => {
   const saved = await getSettings()
   if (saved) {
-    settings.value = saved
+    settings.value = { ...settings.value, ...saved }
+    if (!settings.value.defaultVisibility) {
+      settings.value.defaultVisibility = 'private'
+    }
   }
 })
 

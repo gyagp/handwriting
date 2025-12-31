@@ -1,5 +1,3 @@
-import { CharacterInfo } from '@/types'
-
 // GB2312一级字库生成器
 // GB2312一级字库编码范围：B0A1-D7FE（高字节B0-D7，低字节A1-FE）
 // 共87个区（高字节），每区94个字符（低字节）
@@ -107,7 +105,6 @@ export function getStrokes(char: string): number {
 // 获取字符的GB2312编码
 export function getGB2312Code(char: string): string {
   try {
-    const encoder = new TextEncoder()
     // 这里简化处理，实际需要使用GB2312编码器
     // 浏览器环境使用TextEncoder只支持UTF-8
     // 返回一个占位符，实际使用时需要查表

@@ -18,8 +18,8 @@
         :key="char.code"
         :info="char"
         :collected="currentUser?.role !== 'admin' && !!collectedMap[char.char]"
-        :sample="currentUser?.role !== 'admin' ? collectedMap[char.char]?.svgPath : undefined"
-        :sampleViewBox="currentUser?.role !== 'admin' ? collectedMap[char.char]?.svgViewBox : undefined"
+        :sample="currentUser?.role !== 'admin' ? collectedMap[char.char]?.sample.svgPath : undefined"
+        :sampleViewBox="currentUser?.role !== 'admin' ? collectedMap[char.char]?.sample.svgViewBox : undefined"
         @click="goToDetail(char)"
       />
     </div>
@@ -39,14 +39,14 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { gb2312AllChars, getPinyin, getGB2312Code, getStrokes, getRadical, punctuationChars } from '@/data/gb2312-generator'
-import { getCollectedSamplesMap, currentUser } from '@/services/db'
+import { getCollectedStatsMap, currentUser } from '@/services/db'
 import CharacterCard from '@/components/CharacterCard.vue'
-import type { CharacterInfo, CharacterSample } from '@/types'
+import type { CharacterInfo, CharacterStats } from '@/types'
 
 const router = useRouter()
 const searchText = ref('')
 const activeTab = ref('all')
-const collectedMap = ref<Record<string, CharacterSample>>({})
+const collectedMap = ref<Record<string, CharacterStats>>({})
 const pageSize = 50
 const currentPage = ref(1)
 
@@ -68,7 +68,7 @@ const collectedCount = computed(() => allChars.value.filter(c => collectedMap.va
 const uncollectedCount = computed(() => totalCount.value - collectedCount.value)
 
 onMounted(async () => {
-  collectedMap.value = await getCollectedSamplesMap()
+  collectedMap.value = await getCollectedStatsMap()
 })
 
 const filteredList = computed(() => {
