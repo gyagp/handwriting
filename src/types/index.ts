@@ -8,7 +8,7 @@ export interface CharacterInfo {
 }
 
 export type Visibility = 'private' | 'public'
-export type Role = 'user' | 'admin'
+export type Role = 'user' | 'admin' | 'guest'
 export type WorkStatus = 'draft' | 'pending' | 'published' | 'rejected'
 
 export interface User {
@@ -18,6 +18,7 @@ export interface User {
   role: Role
   createdAt: number
   collectedWorkIds?: string[] // IDs of public works collected by this user
+  collectionVisibility?: 'public' | 'private' // Global visibility setting for this user
 }
 
 export interface Rating {
@@ -32,14 +33,15 @@ export interface Rating {
 export interface CharacterSample {
   id: string                // 唯一ID
   userId: string            // 用户ID
-  visibility: Visibility    // 可见性
+  visibility: Visibility    // 可见性 (Deprecated in favor of User.collectionVisibility + isRefined)
   char: string              // 对应的汉字
   svgPath: string           // SVG路径数据 (压缩后)
   svgViewBox: string        // SVG viewBox
   thumbnail: string         // 缩略图 Base64 (WebP)
   rating: number            // 自评评分 1-5 (保留用于兼容)
   score?: number            // 公众评分平均分 0-100
-  isAdjusted?: boolean      // 是否已精修调整
+  isAdjusted?: boolean      // 是否已调整 (Position/Scale)
+  isRefined?: boolean       // 是否已精修 (Ready for public)
   createdAt: number         // 创建时间戳
   tags: string[]            // 标签
 }
@@ -64,15 +66,13 @@ export interface ExtractedCharacter {
     width: number
     height: number
   }
-  recognized?: string       // OCR识别结果 (可选)
-  confidence?: number       // 识别置信度
 }
 
 // 应用设置
 export interface AppSettings {
   gridType: GridType        // 默认格子类型
+  defaultLayout?: 'horizontal' | 'vertical' // 默认排版方向
   gridSize: number          // 格子大小 (像素)
-  autoRecognize: boolean    // 自动OCR识别
   compressionLevel: number  // 压缩级别 0-9
   theme: 'light' | 'dark'   // 主题
   defaultVisibility?: 'public' | 'private' // 默认可见性 (作品和字形)
@@ -80,9 +80,7 @@ export interface AppSettings {
 
 // 书法作品
 export interface Work {
-  id: string
-  userId: string            // 用户ID
-  visibility: Visibility    // 可见性
+  id: string (Deprecated)
   status: WorkStatus        // 审核状态
   title: string
   author?: string           // 作者
@@ -92,9 +90,15 @@ export interface Work {
   layout: 'horizontal' | 'vertical' // 排版方向
   gridType?: GridType       // 格子类型
   score?: number            // 公众评分平均分 0-100
+  isRefined?: boolean       // 是否已精修
+  gridType?: GridType       // 格子类型
+  score?: number            // 公众评分平均分 0-100
   createdAt: number
   updatedAt: number
+  userId: string            // 用户ID
+  visibility: Visibility    // 可见性
   authorDeleted?: boolean   // 作者是否已删除(仅对公开作品有效，删除后仅从作者列表移除)
+  originWorkId?: string     // 如果是收藏的作品，指向原始作品ID
 }
 
 export interface CharacterStats {

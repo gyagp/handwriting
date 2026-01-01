@@ -24,9 +24,11 @@ let allowedChars: Set<string> | null = null
 
 function getAllowedChars(): Set<string> {
   if (!allowedChars) {
+    const punctuation = ['，', '。', '！', '？', '、', '；', '：', '“', '”', '‘', '’', '（', '）', '【', '】', '《', '》', '…', '—', '·']
     allowedChars = new Set([
       ...generateGB2312Level1Chars(),
-      ...generateGB2312Level2Chars()
+      ...generateGB2312Level2Chars(),
+      ...punctuation
     ])
   }
   return allowedChars
@@ -37,16 +39,54 @@ export const currentUser = ref<User | null>(null)
 
 // --- User Management ---
 
+function getUsernameLength(str: string) {
+  let len = 0
+  for (const char of str) {
+    if (/[\u4e00-\u9fa5]/.test(char)) {
+      len += 2
+    } else {
+      len += 1
+    }
+  }
+  return len
+}
+
 export async function registerUser(username: string, password?: string): Promise<User> {
+  // Username validation
+  if (!username) throw new Error('用户名不能为空')
+
+  // Check allowed characters: Chinese, numbers, letters, _, ., -
+  if (!/^[\u4e00-\u9fa5a-zA-Z0-9_.-]+$/.test(username)) {
+    throw new Error('用户名只允许使用汉字、数字、字母、下划线、点和短横线')
+  }
+
+  const nameLen = getUsernameLength(username)
+  if (nameLen < 4 || nameLen > 30) {
+    throw new Error('用户名长度需为4至30个字符(1个汉字=2个字符)')
+  }
+
+  // Password validation
+  if (!password) throw new Error('密码不能为空')
+  if (password.length < 7 || password.length > 16) {
+    throw new Error('密码长度必须是7-16位')
+  }
+  if (/^\d+$/.test(password)) {
+    throw new Error('密码不能是纯数字')
+  }
+  // Optional: Check if password contains only allowed characters (letters, numbers, symbols)
+  // The requirement says "英文字母、数字、字符组合", usually implies ASCII printable characters.
+  // Let's assume standard keyboard characters.
+
   if (store.users.find(u => u.username === username)) {
-    throw new Error('Username already exists')
+    throw new Error('用户名已存在')
   }
   const user: User = {
     id: crypto.randomUUID(),
     username,
     password,
     role: 'user',
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    collectionVisibility: 'private'
   }
   store.users.push(user)
   await syncToFile()
@@ -62,9 +102,24 @@ export async function loginUser(username: string, password?: string): Promise<Us
   if (user.password && user.password !== password) {
      throw new Error('Invalid password')
   }
+  // Ensure default visibility
+  if (!user.collectionVisibility) user.collectionVisibility = 'private'
+
   currentUser.value = user
   localStorage.setItem('last_user', user.username)
   return user
+}
+
+export async function loginAsGuest(): Promise<User> {
+  const guestUser: User = {
+    id: 'guest-' + crypto.randomUUID(),
+    username: '游客',
+    role: 'guest',
+    createdAt: Date.now(),
+    collectionVisibility: 'private'
+  }
+  currentUser.value = guestUser
+  return guestUser
 }
 
 export function logoutUser() {
@@ -93,7 +148,9 @@ export async function updateUser(user: User) {
 
 export function getUsername(userId: string): string {
   const user = store.users.find(u => u.id === userId)
-  return user ? user.username : 'Unknown'
+  if (user) return user.username
+  if (userId.startsWith('guest-')) return '游客'
+  return 'Unknown'
 }
 
 // --- 文件同步逻辑 ---
@@ -235,7 +292,6 @@ export async function initSettings() {
       id: 1,
       gridType: 'mi',
       gridSize: 100,
-      autoRecognize: true,
       compressionLevel: 5,
       theme: 'light',
       defaultVisibility: 'private'
@@ -329,6 +385,7 @@ export async function initDefaultWorks() {
 
 export async function saveRating(targetId: string, targetType: 'sample' | 'work', score: number) {
   if (!currentUser.value) throw new Error('Must be logged in')
+  if (currentUser.value.role === 'guest') throw new Error('游客不能评分')
   if (score < 0 || score > 10) throw new Error('Score must be 0-10')
 
   const existingIndex = store.ratings.findIndex(r =>
@@ -438,40 +495,11 @@ export async function saveSample(sample: CharacterSample) {
 export async function setAllVisibility(visibility: 'public' | 'private') {
   if (!currentUser.value) throw new Error('Must be logged in')
 
-  let changed = false
-
-  // Update samples
-  store.samples.forEach(s => {
-    if (s.userId === currentUser.value!.id && s.visibility !== visibility) {
-      s.visibility = visibility
-      changed = true
-    }
-  })
-
-  // Update works
-  store.works.forEach(w => {
-    if (w.userId === currentUser.value!.id) {
-      // Skip if trying to make private but it's already published public (restriction)
-      if (visibility === 'private' && w.visibility === 'public' && w.status === 'published') {
-        return
-      }
-
-      if (w.visibility !== visibility) {
-        w.visibility = visibility
-        // If making public, set to pending if not admin
-        if (visibility === 'public' && w.status !== 'published') {
-           w.status = currentUser.value!.role === 'admin' ? 'published' : 'pending'
-        }
-        // If making private, set to published (active)
-        if (visibility === 'private') {
-           w.status = 'published'
-        }
-        changed = true
-      }
-    }
-  })
-
-  if (changed) {
+  // Update user setting
+  const userIndex = store.users.findIndex(u => u.id === currentUser.value!.id)
+  if (userIndex >= 0) {
+    store.users[userIndex].collectionVisibility = visibility
+    currentUser.value.collectionVisibility = visibility
     await syncToFile()
   }
 }
@@ -486,7 +514,17 @@ export async function getSamplesByChar(char: string): Promise<CharacterSample[]>
 
   return store.samples
     .filter(s => s.char === char)
-    .filter(s => s.visibility === 'public' || s.userId === currentUserId || isAdmin)
+    .filter(s => {
+      // My samples
+      if (s.userId === currentUserId) return true
+      // Admin samples (always public if marked public)
+      const owner = store.users.find(u => u.id === s.userId)
+      if (owner?.role === 'admin' && s.visibility === 'public') return true
+      // Other users' samples: Public Collection AND Refined
+      if (owner?.role === 'user' && owner.collectionVisibility === 'public' && s.isRefined) return true
+
+      return false
+    })
     .sort((a, b) => {
       // Current user's samples always come first
       if (a.userId === currentUserId && b.userId !== currentUserId) return -1
@@ -500,9 +538,22 @@ export async function getSamplesByChar(char: string): Promise<CharacterSample[]>
 export async function getCollectedChars(): Promise<string[]> {
   await loadFromFile()
   const currentUserId = currentUser.value?.id
-  const chars = new Set(store.samples
-    .filter(s => s.visibility === 'public' || s.userId === currentUserId)
-    .map(s => s.char))
+
+  // Only return chars that have at least one visible sample
+  const chars = new Set<string>()
+
+  for (const s of store.samples) {
+      let visible = false
+      if (s.userId === currentUserId) visible = true
+      else {
+          const owner = store.users.find(u => u.id === s.userId)
+          if (owner?.role === 'admin' && s.visibility === 'public') visible = true
+          else if (owner?.role === 'user' && owner.collectionVisibility === 'public' && s.isRefined) visible = true
+      }
+
+      if (visible) chars.add(s.char)
+  }
+
   return Array.from(chars)
 }
 
@@ -552,7 +603,9 @@ export async function getWorkStats(works: Work[]): Promise<Record<string, number
 
   for (const work of works) {
     let count = 0
-    for (const char of work.content) {
+    const fullText = (work.title || '') + (work.author || '') + work.content
+    for (const char of fullText) {
+      if (/\s/.test(char)) continue
       if (userCharSet.has(`${work.userId}_${char}`)) {
         count++
       }
@@ -618,10 +671,15 @@ export async function saveWork(work: Work) {
   } else {
      // Normal user
      if (work.visibility === 'public') {
-        // Auto-publish for now to simplify
-        work.status = 'published'
+        // If it's already published (approved), keep it published (unless we want to re-approve on edit?)
+        // Requirement: "Once public, only admin can modify or delete".
+        // So user shouldn't be able to edit a published public work.
+        // But if it's a new submission or pending:
+        if (work.status !== 'published') {
+            work.status = 'pending'
+        }
      } else {
-        // Private works are automatically "published" (valid/active)
+        // Private works are always published (active)
         work.status = 'published'
      }
   }
@@ -644,9 +702,24 @@ export async function saveWork(work: Work) {
          throw new Error('Permission denied')
        }
 
-       // Prevent changing public published work to private
-       if (existingWork.visibility === 'public' && existingWork.status === 'published' && work.visibility === 'private') {
-          throw new Error('已发布的作品不能转为私有')
+       // Check if user is trying to edit a published public work
+       if (existingWork.visibility === 'public' && existingWork.status === 'published') {
+           // Requirement: "作品一旦公开，admin之外无权修改或删除"
+           // But maybe they can change it back to private?
+           // "Once public... admin only".
+           // Let's strictly forbid editing content if it's public & published.
+           // Unless they are changing it to private?
+           // If they change visibility to private, then it's no longer "public work".
+           if (work.visibility === 'public') {
+               // Allow owner to modify writing (styles/adjustments/refined status)
+               // But forbid modifying content/title/author
+               if (work.content !== existingWork.content ||
+                   work.title !== existingWork.title ||
+                   work.author !== existingWork.author) {
+                   throw new Error('已公开的作品无法修改内容，请联系管理员')
+               }
+               // If content is same, allow update (it's just writing update)
+           }
        }
 
        store.works[index] = work
@@ -654,25 +727,10 @@ export async function saveWork(work: Work) {
   } else {
     // Create new
     work.userId = currentUser.value.id
-    if (!work.visibility) {
-      work.visibility = store.settings?.defaultVisibility || 'private'
-    }
+    // work.visibility is already set by the caller (WorkEditor)
+    // work.status is already set by the logic above
+    if (work.isRefined === undefined) work.isRefined = false
 
-    // Re-evaluate status based on the assigned visibility
-    if (currentUser.value.role !== 'admin') {
-       if (work.visibility === 'public') {
-          work.status = 'pending'
-       } else {
-          work.status = 'published'
-       }
-    } else {
-       if (work.visibility === 'public') {
-          work.status = 'published'
-       }
-    }
-
-    // Status is already set above
-    if (!work.status) work.status = 'published' // Fallback
     if (!work.createdAt) work.createdAt = Date.now()
     store.works.push(work)
   }
@@ -696,14 +754,24 @@ export async function getWorks(): Promise<Work[]> {
 
   return [...store.works]
     .filter(w => {
-      // 1. Public works are visible to everyone
-      if (w.visibility === 'public') return true
-
-      // 2. Own works are visible to the user
+      // 1. Own works are visible to the user
       if (w.userId === currentUserId) return true
 
-      // 3. Admin sees pending works
-      if (isAdmin && w.status === 'pending') return true
+      // 2. Public works (Templates)
+      // Requirement: "审核通过后，该作品公开，所有用户可见"
+      if (w.visibility === 'public' && w.status === 'published') return true
+
+      // 3. Other Users' Refined Instances (Writing Visibility)
+      // Requirement: "已精修且处于公开状态的书写，所有普通账户和游客可见"
+      if (w.visibility === 'private' && w.isRefined) {
+          const owner = store.users.find(u => u.id === w.userId)
+          if (owner && owner.collectionVisibility === 'public') {
+              return true
+          }
+      }
+
+      // 4. Admin sees pending works
+      if (isAdmin) return true
 
       return false
     })
@@ -760,14 +828,13 @@ export async function deleteWork(id: string) {
       throw new Error('Permission denied')
     }
 
-    // If it's a public published work, user can only "hide" it from their list
+    // Ordinary users can only delete private works or non-published public works (pending/rejected)
     if (work.visibility === 'public' && work.status === 'published') {
-      work.authorDeleted = true
-      work.updatedAt = Date.now()
-    } else {
-      // Private or draft/pending/rejected works are permanently deleted
-      store.works = store.works.filter(w => w.id !== id)
+      throw new Error('已公开的作品无法删除')
     }
+
+    // Private works are permanently deleted
+    store.works = store.works.filter(w => w.id !== id)
   }
 
   await syncToFile()
@@ -797,36 +864,43 @@ export async function collectWork(workId: string) {
 
   const work = store.works.find(w => w.id === workId)
   if (!work) throw new Error('Work not found')
-  if (work.visibility !== 'public' || work.status !== 'published') throw new Error('Cannot collect private or unpublished work')
 
-  // Find current user in store to update
-  const userIndex = store.users.findIndex(u => u.id === currentUser.value!.id)
-  if (userIndex === -1) return
+  // Check if already collected (by checking if I have a work with same title/content? Or just allow duplicates?)
+  // The prompt says "add public works to own collection... unrefined state".
+  // Let's allow duplicates for now, or check if we already have a work with same title/content.
+  // But user might want multiple versions.
 
-  const user = store.users[userIndex]
-  if (!user.collectedWorkIds) user.collectedWorkIds = []
-
-  if (!user.collectedWorkIds.includes(workId)) {
-    user.collectedWorkIds.push(workId)
-    // Update currentUser ref as well with new array reference
-    currentUser.value.collectedWorkIds = [...user.collectedWorkIds]
-    await syncToFile()
+  const newWork: Work = {
+    id: crypto.randomUUID(),
+    userId: currentUser.value.id,
+    visibility: 'private', // Always private initially
+    status: 'published', // Private works are published/active
+    title: work.title,
+    author: work.author,
+    content: work.content,
+    charStyles: {}, // Start fresh or copy? "Unrefined" implies we need to select handwriting.
+    charAdjustments: {},
+    layout: work.layout,
+    gridType: work.gridType,
+    isRefined: false, // Unrefined state
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    originWorkId: work.id
   }
+
+  store.works.push(newWork)
+
+  if (!currentUser.value.collectedWorkIds) currentUser.value.collectedWorkIds = []
+  if (!currentUser.value.collectedWorkIds.includes(workId)) {
+    currentUser.value.collectedWorkIds.push(workId)
+  }
+
+  await syncToFile()
 }
 
 export async function uncollectWork(workId: string) {
-  if (!currentUser.value) throw new Error('Must be logged in')
-
-  const userIndex = store.users.findIndex(u => u.id === currentUser.value!.id)
-  if (userIndex === -1) return
-
-  const user = store.users[userIndex]
-  if (!user.collectedWorkIds) return
-
-  user.collectedWorkIds = user.collectedWorkIds.filter(id => id !== workId)
-  // Create a new array reference to ensure reactivity
-  currentUser.value.collectedWorkIds = [...user.collectedWorkIds]
-  await syncToFile()
+  // This is now just deleting my work
+  await deleteWork(workId)
 }
 
 export async function clearAllData() {

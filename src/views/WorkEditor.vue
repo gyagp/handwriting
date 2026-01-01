@@ -14,7 +14,7 @@
           size="small"
           @click="save"
         >
-          {{ (isPublic && currentUser?.role !== 'admin') ? '提交审核' : '保存' }}
+          {{ (work.visibility === 'public' && work.status === 'rejected') ? '重新提交' : ((isPublic && currentUser?.role !== 'admin') ? '提交审核' : '保存') }}
         </van-button>
 
         <van-button
@@ -28,7 +28,7 @@
         </van-button>
 
         <van-button
-          v-if="isReadOnly && work.userId !== currentUser?.id"
+          v-if="isReadOnly && work.userId !== currentUser?.id && currentUser?.role !== 'guest'"
           size="small"
           icon="star-o"
           @click="showRating = true"
@@ -40,8 +40,8 @@
 
     <div class="editor-content">
       <van-cell-group inset>
-        <van-field v-model="work.title" label="标题" placeholder="请输入作品标题" :readonly="isReadOnly" />
-        <van-field v-model="work.author" label="作者" placeholder="请输入作者姓名" :readonly="isReadOnly" />
+        <van-field v-if="!isReadOnly" v-model="work.title" label="标题" placeholder="请输入作品标题" />
+        <van-field v-if="!isReadOnly" v-model="work.author" label="作者" placeholder="请输入作者姓名" />
         <van-field :model-value="getUsername(work.userId)" label="书写者" readonly v-if="isReadOnly && work.userId && work.userId !== currentUser?.id" />
         <van-field :model-value="getUsername(work.userId)" label="上传人" readonly v-if="currentUser?.role === 'admin' && work.userId && work.userId === currentUser?.id" />
         <van-cell title="评分" v-if="work.score">
@@ -61,7 +61,7 @@
         />
         <van-cell title="排版方向">
           <template #right-icon>
-            <van-radio-group v-model="work.layout" direction="horizontal" :disabled="isReadOnly">
+            <van-radio-group v-model="work.layout" direction="horizontal">
               <van-radio name="horizontal">横排</van-radio>
               <van-radio name="vertical">竖排</van-radio>
             </van-radio-group>
@@ -69,13 +69,16 @@
         </van-cell>
         <van-cell title="格子样式">
           <template #right-icon>
-            <van-radio-group v-model="work.gridType" direction="horizontal" :disabled="isReadOnly">
+            <van-radio-group v-model="work.gridType" direction="horizontal">
               <van-radio name="mi">米字</van-radio>
               <van-radio name="tian">田字</van-radio>
               <van-radio name="hui">回字</van-radio>
               <van-radio name="none">无</van-radio>
             </van-radio-group>
           </template>
+        </van-cell>
+        <van-cell>
+           <van-button size="small" block plain type="primary" @click="saveAsDefaultStyle">保存为默认样式</van-button>
         </van-cell>
         <van-cell title="显示大小">
           <template #right-icon>
@@ -85,37 +88,74 @@
             </div>
           </template>
         </van-cell>
-        <van-cell title="公开可见" v-if="!isReadOnly">
+        <van-cell title="已精修" v-if="!isReadOnly">
           <template #right-icon>
-            <van-switch v-model="isPublic" size="20" :disabled="!canChangeVisibility" />
+            <van-switch v-model="isRefined" size="20" />
+          </template>
+        </van-cell>
+        <van-cell title="公开作品" v-if="!isReadOnly && canChangeVisibility">
+          <template #label>
+             <span v-if="work.visibility === 'public'">公开作品需审核，审核通过后所有人可见</span>
+             <span v-else>私有作品仅自己可见</span>
+          </template>
+          <template #right-icon>
+            <van-switch :model-value="work.visibility === 'public'" @update:model-value="val => work.visibility = val ? 'public' : 'private'" size="20" />
           </template>
         </van-cell>
         <van-cell title="状态" v-if="isEdit">
            <template #right-icon>
-              <van-tag v-if="work.status === 'published' && work.visibility === 'public'" type="success">已发布</van-tag>
-              <van-tag v-else-if="work.visibility === 'private'" type="primary">私有</van-tag>
-              <van-tag v-else-if="work.status === 'pending'" type="warning">审核中</van-tag>
-              <van-tag v-else-if="work.status === 'rejected'" type="danger">已驳回</van-tag>
-              <van-tag v-else type="default">草稿</van-tag>
+              <div style="display: flex; gap: 5px;">
+                <van-tag v-if="work.status === 'pending'" type="warning">审核中</van-tag>
+                <van-tag v-else-if="work.status === 'rejected'" type="danger">已驳回</van-tag>
+                <van-tag v-else-if="work.visibility === 'public'" type="primary">公开</van-tag>
+                <van-tag v-else type="default">私有</van-tag>
+
+                <van-tag v-if="work.isRefined" type="success">已精修</van-tag>
+                <van-tag v-else type="default">未精修</van-tag>
+              </div>
            </template>
         </van-cell>
       </van-cell-group>
 
       <div class="preview-area" :class="work.layout">
+        <!-- Title Display -->
+        <div v-if="isReadOnly && work.title" class="meta-display title-display">
+           <div v-for="(char, idx) in work.title" :key="'t'+idx" class="meta-char">
+              <GridDisplay
+                :size="zoomLevel * 1.2"
+                :content="getMetaDisplayContent(char)"
+                :viewBox="getMetaDisplayViewBox(char)"
+                :type="getMetaDisplayType(char)"
+              />
+           </div>
+        </div>
+
+        <!-- Author Display -->
+        <div v-if="isReadOnly && work.author" class="meta-display author-display">
+           <div v-for="(char, idx) in work.author" :key="'a'+idx" class="meta-char">
+              <GridDisplay
+                :size="zoomLevel * 0.8"
+                :content="getMetaDisplayContent(char)"
+                :viewBox="getMetaDisplayViewBox(char)"
+                :type="getMetaDisplayType(char)"
+              />
+           </div>
+        </div>
+
         <div
-          v-for="(char, index) in charList"
-          :key="index"
+          v-for="(item, idx) in charList"
+          :key="item.index"
           class="char-box"
-          @click="openSelector(index, char)"
+          @click="openSelector(item.index, item.char)"
         >
           <GridDisplay
             :size="zoomLevel"
-            :content="getDisplayContent(index, char)"
-            :viewBox="getDisplayViewBox(index)"
+            :content="getDisplayContent(item.index, item.char)"
+            :viewBox="getDisplayViewBox(item.index)"
             :type="work.gridType || settings.gridType"
           />
           <!-- 如果没有收集该字，显示提示 -->
-          <div v-if="!hasSample(char) && !isReadOnly && currentUser?.role !== 'admin'" class="missing-mark"></div>
+          <div v-if="!hasSample(item.char) && !isReadOnly && currentUser?.role !== 'admin'" class="missing-mark"></div>
         </div>
       </div>
     </div>
@@ -233,14 +273,14 @@
               />
               <span v-if="rWork.content.length > 8" style="align-self: flex-end; color: #999;">...</span>
           </div>
-          <div class="related-footer" @click.stop style="margin-top: 8px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #eee; padding-top: 8px;">
+          <div class="related-footer" v-if="currentUser?.role !== 'guest'" @click.stop style="margin-top: 8px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #eee; padding-top: 8px;">
              <span style="font-size: 12px; color: #666;">我的评分:</span>
-             <van-rate 
-                v-model="myRatings[rWork.id]" 
-                :count="5" 
-                allow-half 
-                size="14" 
-                @change="(val) => onRateWork(rWork, val)" 
+             <van-rate
+                v-model="myRatings[rWork.id]"
+                :count="5"
+                allow-half
+                size="14"
+                @change="(val) => onRateWork(rWork, val)"
              />
           </div>
         </div>
@@ -252,7 +292,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, toRaw } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getWork, saveWork, getSamplesByChar, getSettings, saveSample, currentUser, saveRating, getMyRating, getUsername, getSamplesForWork, getRelatedPublicWorks, getWorks } from '@/services/db'
+import { getWork, saveWork, getSamplesByChar, getSettings, saveSettings, saveSample, currentUser, saveRating, getMyRating, getUsername, getSamplesForWork, getRelatedPublicWorks, getWorks } from '@/services/db'
 import GridDisplay from '@/components/GridDisplay.vue'
 import CharacterAdjustmentDialog from '@/components/CharacterAdjustmentDialog.vue'
 import type { Work, CharacterSample, AppSettings } from '@/types'
@@ -263,7 +303,7 @@ const router = useRouter()
 const isEdit = computed(() => !!route.params.id)
 
 const zoomLevel = ref(40)
-const isPublic = ref(false)
+const isRefined = ref(false)
 const isReadOnly = ref(false)
 const showRating = ref(false)
 const ratingScore = ref(0)
@@ -287,17 +327,14 @@ const isWorkComplete = computed(() => {
 
 const canChangeVisibility = computed(() => {
   if (currentUser.value?.role === 'admin') return true
-  if (!isEdit.value) return true
-  // If it's already public and published, normal user cannot change it back to private
-  if (work.value.visibility === 'public' && work.value.status === 'published') return false
-  return true
+  return false // Ordinary users cannot change visibility manually
 })
 
 const work = ref<Work>({
   id: crypto.randomUUID(),
   userId: '', // Will be set by saveWork
-  visibility: 'private',
-  status: 'draft',
+  visibility: 'public', // Default to public (Template)
+  status: 'pending',
   title: '',
   author: '',
   content: '',
@@ -312,7 +349,6 @@ const work = ref<Work>({
 const settings = ref<AppSettings>({
   gridType: 'mi',
   gridSize: 100,
-  autoRecognize: true,
   compressionLevel: 5,
   theme: 'light'
 })
@@ -321,22 +357,42 @@ const settings = ref<AppSettings>({
 const samplesCache = ref<Record<string, CharacterSample[]>>({})
 
 const charList = computed(() => {
-  return work.value.content.split('').filter(c => c.trim())
+  return work.value.content.split('').map((c, i) => ({ char: c, index: i })).filter(item => item.char.trim())
 })
 
-
-
-
+const saveAsDefaultStyle = async () => {
+  try {
+    await saveSettings({
+      gridType: work.value.gridType,
+      defaultLayout: work.value.layout
+    })
+    showToast('已保存为默认样式')
+  } catch (e: any) {
+    showToast('保存失败: ' + e.message)
+  }
+}
 
 onMounted(async () => {
   const s = await getSettings()
-  if (s) settings.value = s
+  if (s) {
+    settings.value = s
+    if (!isEdit.value) {
+      if (s.defaultLayout) work.value.layout = s.defaultLayout
+      if (s.gridType) work.value.gridType = s.gridType
+    }
+  }
 
   if (isEdit.value) {
     const w = await getWork(route.params.id as string)
     if (w) {
       work.value = w
-      isPublic.value = w.visibility === 'public'
+      // If it's not my work, start as unrefined (it's a new draft for me)
+      if (w.userId !== currentUser.value?.id) {
+          isRefined.value = false
+      } else {
+          isRefined.value = !!w.isRefined
+      }
+
       if (!work.value.gridType) {
         work.value.gridType = settings.value.gridType
       }
@@ -344,12 +400,18 @@ onMounted(async () => {
       // Check permissions
       if (currentUser.value?.role !== 'admin') {
         if (w.userId !== currentUser.value?.id) {
-           isReadOnly.value = true
+           // If it's not my work, I can still edit it (as a template/clone)
+           // But I cannot save OVER it.
+           // isReadOnly.value = true // Allow editing
         }
         // Author can always edit their own work, even if published
       }
 
       if (isReadOnly.value) {
+         // Apply viewer preferences
+         if (settings.value.defaultLayout) work.value.layout = settings.value.defaultLayout
+         if (settings.value.gridType) work.value.gridType = settings.value.gridType
+
          // Load my rating
          const myScore = getMyRating(w.id, 'work')
          if (myScore) ratingScore.value = myScore / 2
@@ -561,6 +623,43 @@ const getRelatedCharViewBox = (rWork: Work, index: number) => {
   return undefined
 }
 
+const preloadSamples = async (text: string) => {
+  // Include title and author in preload
+  const fullText = text + (work.value.title || '') + (work.value.author || '')
+  const chars = new Set(fullText.split('').filter(c => c.trim()))
+  for (const char of chars) {
+    if (!samplesCache.value[char]) {
+      samplesCache.value[char] = await getSamplesByChar(char)
+    }
+  }
+  // 随机分配样式
+  if (!isReadOnly.value) {
+     randomizeStyles(text)
+  }
+}
+
+const getMetaDisplayContent = (char: string) => {
+  // For title/author, use my best sample
+  const samples = getUsableSamples(char)
+  if (samples && samples.length > 0) {
+    return samples[0].svgPath
+  }
+  return char
+}
+
+const getMetaDisplayViewBox = (char: string) => {
+  const samples = getUsableSamples(char)
+  if (samples && samples.length > 0) {
+    return samples[0].svgViewBox
+  }
+  return undefined
+}
+
+const getMetaDisplayType = (char: string) => {
+  const samples = getUsableSamples(char)
+  return (samples && samples.length > 0) ? 'none' : 'text'
+}
+
 const submitRating = async () => {
   try {
     await saveRating(work.value.id, 'work', ratingScore.value * 2)
@@ -572,19 +671,6 @@ const submitRating = async () => {
 
 const handleContentChange = (val: string) => {
   preloadSamples(val)
-}
-
-const preloadSamples = async (text: string) => {
-  const chars = new Set(text.split('').filter(c => c.trim()))
-  for (const char of chars) {
-    if (!samplesCache.value[char]) {
-      samplesCache.value[char] = await getSamplesByChar(char)
-    }
-  }
-  // 随机分配样式
-  if (!isReadOnly.value) {
-     randomizeStyles(text)
-  }
 }
 
 const getUsableSamples = (char: string) => {
@@ -647,7 +733,7 @@ const getDisplayViewBox = (index: number) => {
     }
   }
 
-  const char = charList.value[index]
+  const char = work.value.content[index]
 
   // If it's my work, check selected style
   if (work.value.userId === currentUser.value?.id) {
@@ -807,13 +893,75 @@ const save = async () => {
     showToast('请输入标题')
     return
   }
-  work.value.visibility = isPublic.value ? 'public' : 'private'
+
   if (!work.value.content) {
     showToast('请输入内容')
     return
   }
 
+  // 验证：只有所有字都有自己的书写，才能标记为已精修
+  if (isRefined.value) {
+    // 确保样本已加载
+    await preloadSamples(work.value.content)
+
+    const validChars = work.value.content.split('').filter(c => /[a-zA-Z0-9\u4e00-\u9fa5]/.test(c))
+    const missingChars = validChars.filter(char => {
+      const samples = samplesCache.value[char]
+      // 检查是否有属于当前用户的样本
+      return !samples || !samples.some(s => s.userId === currentUser.value?.id)
+    })
+
+    if (missingChars.length > 0) {
+      const uniqueMissing = [...new Set(missingChars)]
+      const displayMissing = uniqueMissing.slice(0, 5).join('，')
+      const more = uniqueMissing.length > 5 ? ' 等' : ''
+      showToast(`无法标记为已精修：缺少以下字的个人书写：${displayMissing}${more}`)
+      return
+    }
+  }
+
+  work.value.isRefined = isRefined.value
+
   try {
+    // If I am editing someone else's work, save as a new work (Clone)
+    if (work.value.userId !== currentUser.value?.id) {
+        work.value.originWorkId = work.value.id
+        work.value.id = crypto.randomUUID()
+        work.value.userId = currentUser.value?.id || ''
+        work.value.createdAt = Date.now()
+        work.value.updatedAt = Date.now()
+        work.value.visibility = 'private' // Default to private
+        // work.value.isRefined is already set from isRefined.value, which defaults to false for clones in onMounted
+        // Keep content, title, author, layout, gridType
+        // Keep charStyles? Yes, keep them as starting point.
+        // Keep charAdjustments? Yes.
+    } else if (!isEdit.value && currentUser.value?.role !== 'admin') {
+        // New Work by Ordinary User:
+        // 1. Create Public Template (Pending)
+        // 2. Create Private Instance (Clone)
+
+        // 1. Template
+        const templateId = work.value.id
+        const templateWork = { ...toRaw(work.value) }
+        templateWork.visibility = 'public'
+        templateWork.status = 'pending'
+        templateWork.charStyles = {} // Template has no styles
+        templateWork.charAdjustments = {}
+        templateWork.isRefined = false
+
+        await saveWork(templateWork)
+
+        // 2. Instance
+        work.value.originWorkId = templateId
+        work.value.id = crypto.randomUUID()
+        work.value.userId = currentUser.value?.id || ''
+        work.value.createdAt = Date.now()
+        work.value.updatedAt = Date.now()
+        work.value.visibility = 'private'
+        work.value.status = 'published' // Private instance is always active
+        // Keep styles/adjustments if user added any during creation (though unlikely if we strip them, but let's keep them for the instance)
+    }
+
     await saveWork(toRaw(work.value))
     showToast('保存成功')
     // Use replace to avoid history stack issues, or push to gallery
@@ -938,6 +1086,47 @@ const save = async () => {
 
 .related-header {
   display: flex;
+
+.meta-display {
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Horizontal Layout */
+.preview-area:not(.vertical) .meta-display {
+  width: 100%;
+}
+
+.preview-area:not(.vertical) .title-display {
+  margin-bottom: 8px;
+}
+
+.preview-area:not(.vertical) .author-display {
+  justify-content: flex-end;
+  margin-bottom: 16px;
+  padding-right: 20px;
+}
+
+/* Vertical Layout */
+.preview-area.vertical .meta-display {
+  height: 100%;
+  flex-direction: column;
+  width: auto;
+  padding: 0 16px;
+}
+
+.preview-area.vertical .title-display {
+  order: -2; /* Rightmost in vertical-rl */
+}
+
+.preview-area.vertical .author-display {
+  order: -1;
+  justify-content: flex-end; /* Bottom align author name */
+  padding-bottom: 40px;
+}
   justify-content: space-between;
   margin-bottom: 8px;
   font-size: 14px;

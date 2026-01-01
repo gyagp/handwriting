@@ -46,7 +46,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onActivated, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { getCollectedStatsMap, getSettings, currentUser } from '@/services/db'
 import { gb2312AllChars, getPinyin, getGB2312Code, getStrokes, getRadical, punctuationChars } from '@/data/gb2312-generator'
@@ -63,7 +63,6 @@ const currentPage = ref(1)
 const settings = ref<AppSettings>({
   gridType: 'mi',
   gridSize: 100,
-  autoRecognize: true,
   compressionLevel: 5,
   theme: 'light'
 })
@@ -92,7 +91,7 @@ const collectedAdjustedPercentage = computed(() => totalCount.value ? ((collecte
 const collectedUnadjustedPercentage = computed(() => totalCount.value ? ((collectedUnadjustedCount.value / totalCount.value) * 100).toFixed(1) : '0.0')
 const uncollectedPercentage = computed(() => totalCount.value ? ((uncollectedCount.value / totalCount.value) * 100).toFixed(1) : '0.0')
 
-onMounted(async () => {
+const loadData = async () => {
   const [map, savedSettings] = await Promise.all([
     getCollectedStatsMap(),
     getSettings()
@@ -101,7 +100,10 @@ onMounted(async () => {
   if (savedSettings) {
     settings.value = savedSettings
   }
-})
+}
+
+onMounted(loadData)
+onActivated(loadData)
 
 const filteredList = computed(() => {
   let list = allChars.value

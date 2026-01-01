@@ -60,11 +60,6 @@
               placeholder="按顺序输入汉字，自动填充下方"
               @update:model-value="handleBatchInput"
             />
-            <van-cell center title="公开可见">
-              <template #right-icon>
-                <van-switch v-model="isPublic" size="20" />
-              </template>
-            </van-cell>
             <div style="font-size: 12px; color: #999; padding: 0 16px 8px;">提示：识别出的字符顺序可能需要核对</div>
           </div>
         </div>
@@ -77,7 +72,6 @@
           </div>
           <div class="form">
             <van-field v-model="item.char" label="汉字" placeholder="请输入汉字" />
-            <van-rate v-model="item.rating" :count="5" />
           </div>
         </div>
       </div>
@@ -85,7 +79,7 @@
 
     <van-overlay :show="processing">
       <div class="loading-wrapper">
-        <van-loading type="spinner" color="#fff" vertical>处理中...</van-loading>
+        <van-loading type="spinner" color="#fff" vertical>{{ processingText }}</van-loading>
       </div>
     </van-overlay>
   </div>
@@ -105,6 +99,7 @@ import { showToast } from 'vant'
 const router = useRouter()
 const step = ref(1)
 const processing = ref(false)
+const processingText = ref('处理中...')
 const saving = ref(false)
 const extractedChars = shallowRef<ExtractedCharacter[]>([])
 const selectedIds = ref<Set<string>>(new Set())
@@ -119,6 +114,7 @@ const pendingSaveItems = ref<PendingSaveItem[]>([])
 
 const handleCapture = async (file: File) => {
   processing.value = true
+  processingText.value = '图像处理中...'
   try {
     const img = new Image()
     img.src = URL.createObjectURL(file)
@@ -178,36 +174,44 @@ const handleBatchInput = (val: string) => {
 
 const saveSelected = async () => {
   processing.value = true
+  processingText.value = '正在处理...'
   try {
-    const items: PendingSaveItem[] = []
+    // Filter selected chars first
+    const selectedChars = extractedChars.value.filter(c => selectedIds.value.has(c.id))
 
-    for (const char of extractedChars.value) {
-      if (selectedIds.value.has(char.id)) {
-        // 矢量化
-        const { path, viewBox } = await vectorizeImage(char.imageData)
+    // Process in parallel
+    const promises = selectedChars.map(async (char, index) => {
+      // Update progress text occasionally
+      if (index % 5 === 0) {
+         processingText.value = `正在处理 ${index + 1}/${selectedChars.length}...`
+      }
 
-        items.push({
+      // 1. Vectorize
+      const { path, viewBox } = await vectorizeImage(char.imageData)
+
+      return {
           tempId: char.id,
           id: crypto.randomUUID(),
           userId: currentUser.value?.id || '',
           visibility: 'private',
-          char: '', // 待用户输入
+          char: '',
           svgPath: path,
           svgViewBox: viewBox,
-          thumbnail: '', // 可选：生成缩略图
-          rating: 3,
+          thumbnail: '',
+          rating: 0,
           createdAt: Date.now(),
           tags: []
-        })
-      }
-    }
+      } as PendingSaveItem
+    })
+
+    const items = await Promise.all(promises)
 
     pendingSaveItems.value = items
     batchText.value = ''
     step.value = 3
   } catch (error) {
     console.error(error)
-    showToast('矢量化失败')
+    showToast('处理失败')
   } finally {
     processing.value = false
   }

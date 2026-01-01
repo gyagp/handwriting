@@ -36,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onActivated, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { gb2312AllChars, getPinyin, getGB2312Code, getStrokes, getRadical, punctuationChars } from '@/data/gb2312-generator'
 import { getCollectedStatsMap, currentUser } from '@/services/db'
@@ -67,9 +67,12 @@ const totalCount = computed(() => allChars.value.length)
 const collectedCount = computed(() => allChars.value.filter(c => collectedMap.value[c.char]).length)
 const uncollectedCount = computed(() => totalCount.value - collectedCount.value)
 
-onMounted(async () => {
+const loadData = async () => {
   collectedMap.value = await getCollectedStatsMap()
-})
+}
+
+onMounted(loadData)
+onActivated(loadData)
 
 const filteredList = computed(() => {
   let list = allChars.value

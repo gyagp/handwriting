@@ -3,7 +3,7 @@
     <h1 class="page-title">设置</h1>
 
     <van-cell-group title="用户账户">
-      <van-cell title="当前用户" :value="currentUser?.username || '未登录'" :label="currentUser?.role === 'admin' ? '管理员' : '普通用户'" />
+      <van-cell title="当前用户" :value="currentUser?.username || '未登录'" :label="currentUser?.role === 'admin' ? '管理员' : (currentUser?.role === 'guest' ? '游客' : '普通用户')" />
       <van-cell title="切换用户" is-link @click="showLoginDialog = true" />
       <van-cell title="退出登录" is-link @click="handleLogout" v-if="currentUser" />
     </van-cell-group>
@@ -12,12 +12,15 @@
       <van-cell title="管理用户" is-link @click="showUserList = true" />
     </van-cell-group>
 
-    <van-cell-group title="隐私设置">
-      <van-cell title="字集和作品集可见">
+    <van-cell-group title="隐私设置" v-if="currentUser?.role === 'user'">
+      <van-cell title="书写是否公开">
+        <template #label>
+          公开后，您的已精修书写将对所有人可见并可被评分
+        </template>
         <template #right-icon>
-          <van-radio-group v-model="settings.defaultVisibility" direction="horizontal" @change="handleVisibilityChange">
+          <van-radio-group v-model="userVisibility" direction="horizontal" @change="handleVisibilityChange">
             <van-radio name="public">公开</van-radio>
-            <van-radio name="private">私有</van-radio>
+            <van-radio name="private">不公开</van-radio>
           </van-radio-group>
         </template>
       </van-cell>
@@ -79,15 +82,16 @@ const router = useRouter()
 const settings = ref<AppSettings>({
   gridType: 'mi',
   gridSize: 100,
-  autoRecognize: true,
   compressionLevel: 5,
   theme: 'light',
   defaultVisibility: 'private'
 })
 
+const userVisibility = ref<'public' | 'private'>('private')
+
 const handleVisibilityChange = async (val: 'public' | 'private') => {
   await setAllVisibility(val)
-  showToast('已应用到所有历史数据')
+  showToast('设置已更新')
 }
 
 const showLoginDialog = ref(false)
@@ -175,6 +179,9 @@ onMounted(async () => {
     if (!settings.value.defaultVisibility) {
       settings.value.defaultVisibility = 'private'
     }
+  }
+  if (currentUser.value) {
+    userVisibility.value = currentUser.value.collectionVisibility || 'private'
   }
 })
 

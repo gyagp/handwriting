@@ -20,7 +20,7 @@
           size="small"
           icon="star-o"
           @click="openRating"
-          v-if="!canEdit"
+          v-if="!canEdit && currentUser?.role !== 'guest'"
         >
           {{ myCurrentRating ? `评分 (${myCurrentRating})` : '评分' }}
         </van-button>
@@ -140,7 +140,6 @@ const otherSamples = computed(() => samples.value.filter(s => s.userId !== curre
 const settings = ref<AppSettings>({
   gridType: 'mi',
   gridSize: 100,
-  autoRecognize: true,
   compressionLevel: 5,
   theme: 'light'
 })

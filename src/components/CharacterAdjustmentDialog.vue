@@ -55,7 +55,7 @@
           <van-stepper v-model="form.offsetY" :min="-200" :max="200" :step="0.1" button-size="22px" input-width="40px" />
         </div>
         <div class="control-item" style="justify-content: flex-end;">
-          <van-checkbox v-model="form.isAdjusted">标记为已精修</van-checkbox>
+          <van-checkbox v-model="form.isAdjusted">已精修</van-checkbox>
         </div>
       </div>
     </div>

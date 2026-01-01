@@ -15,6 +15,7 @@ export default defineConfig({
           const rootDataDir = resolve(__dirname, 'data')
           const usersDir = resolve(rootDataDir, 'users')
           const systemFile = resolve(rootDataDir, 'system.json')
+          const publicWorksFile = resolve(rootDataDir, 'public_works.json')
           const oldDataPath = resolve(__dirname, 'data.json')
 
           // Ensure directories exist
@@ -38,6 +39,16 @@ export default defineConfig({
                 responseData.ratings = systemData.ratings || []
                 responseData.settings = systemData.settings || null
 
+                // Load public works
+                if (fs.existsSync(publicWorksFile)) {
+                  try {
+                    const publicWorks = JSON.parse(fs.readFileSync(publicWorksFile, 'utf-8'))
+                    if (Array.isArray(publicWorks)) {
+                      responseData.works.push(...publicWorks)
+                    }
+                  } catch (e) {}
+                }
+
                 // Load user data
                 if (fs.existsSync(usersDir)) {
                   const userFolders = fs.readdirSync(usersDir)
@@ -48,14 +59,20 @@ export default defineConfig({
                       if (fs.existsSync(samplesFile)) {
                         try {
                           const samples = JSON.parse(fs.readFileSync(samplesFile, 'utf-8'))
-                          if (Array.isArray(samples)) responseData.samples.push(...samples)
+                          if (Array.isArray(samples)) {
+                            samples.forEach(s => s.userId = userId)
+                            responseData.samples.push(...samples)
+                          }
                         } catch (e) {}
                       }
                       const worksFile = resolve(userDir, 'works.json')
                       if (fs.existsSync(worksFile)) {
                         try {
                           const works = JSON.parse(fs.readFileSync(worksFile, 'utf-8'))
-                          if (Array.isArray(works)) responseData.works.push(...works)
+                          if (Array.isArray(works)) {
+                            works.forEach(w => w.userId = userId)
+                            responseData.works.push(...works)
+                          }
                         } catch (e) {}
                       }
                     }
@@ -99,6 +116,7 @@ export default defineConfig({
                 // Group data by user
                 const samplesByUser = {}
                 const worksByUser = {}
+                const publicWorks = []
 
                 if (Array.isArray(data.samples)) {
                   for (const sample of data.samples) {
@@ -111,12 +129,17 @@ export default defineConfig({
 
                 if (Array.isArray(data.works)) {
                   for (const work of data.works) {
-                    if (work.userId) {
+                    if (work.visibility === 'public') {
+                      publicWorks.push(work)
+                    } else if (work.userId) {
                       if (!worksByUser[work.userId]) worksByUser[work.userId] = []
                       worksByUser[work.userId].push(work)
                     }
                   }
                 }
+
+                // Save public works
+                fs.writeFileSync(publicWorksFile, JSON.stringify(publicWorks, null, 2))
 
                 // Save user data
                 if (Array.isArray(data.users)) {

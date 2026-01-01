@@ -22,7 +22,7 @@ const routes: RouteRecordRaw[] = [
     path: '/capture',
     name: 'Capture',
     component: () => import('@/views/Capture.vue'),
-    meta: { roles: ['user'] }
+    meta: { roles: ['user', 'guest'] }
   },
   {
     path: '/gallery',

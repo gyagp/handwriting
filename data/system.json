@@ -6,7 +6,8 @@
       "createdAt": 1767104963316,
       "role": "user",
       "password": "gy12345",
-      "collectedWorkIds": []
+      "collectedWorkIds": [],
+      "collectionVisibility": "public"
     },
     {
       "id": "4af295ac-ffb1-49b2-8345-bb5c2da2e4ed",
@@ -23,7 +24,8 @@
       "createdAt": 1767185916501,
       "collectedWorkIds": [
         "0107dd3e-6f33-4ff4-b28e-5bc91cfd336d"
-      ]
+      ],
+      "collectionVisibility": "public"
     }
   ],
   "ratings": [
@@ -51,11 +53,12 @@
   ],
   "settings": {
     "id": 1,
-    "gridType": "hui",
+    "gridType": "none",
     "gridSize": 100,
     "autoRecognize": true,
     "compressionLevel": 5,
     "theme": "light",
-    "defaultVisibility": "public"
+    "defaultVisibility": "public",
+    "defaultLayout": "horizontal"
   }
 }

@@ -6,19 +6,20 @@
         <van-field
           v-model="username"
           label="用户名"
-          placeholder="请输入用户名"
+          placeholder="4-30字符，汉字算2字符"
           :rules="[{ required: true, message: '请填写用户名' }]"
         />
         <van-field
           v-model="password"
           type="password"
           label="密码"
-          placeholder="请输入密码"
+          placeholder="7-16位，不能是纯数字"
           :rules="[{ required: true, message: '请填写密码' }]"
         />
         <div class="actions">
           <van-button type="primary" block @click="handleLogin" :loading="loading">登录</van-button>
           <van-button plain block type="primary" @click="handleRegister" style="margin-top: 12px">注册新用户</van-button>
+          <van-button plain block type="default" @click="handleGuestLogin" style="margin-top: 12px">游客试用</van-button>
         </div>
       </div>
     </div>
@@ -28,7 +29,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { loginUser, registerUser } from '@/services/db'
+import { loginUser, registerUser, loginAsGuest } from '@/services/db'
 import { showToast } from 'vant'
 
 const router = useRouter()
@@ -51,6 +52,16 @@ const handleLogin = async () => {
     showToast(e.message || '登录失败')
   } finally {
     loading.value = false
+  }
+}
+
+const handleGuestLogin = async () => {
+  try {
+    await loginAsGuest()
+    showToast('以游客身份登录')
+    router.replace('/')
+  } catch (e: any) {
+    showToast('登录失败')
   }
 }
 
