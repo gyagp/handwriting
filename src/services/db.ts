@@ -290,7 +290,8 @@ export async function initSettings() {
     store.settings = {
       // @ts-ignore
       id: 1,
-      gridType: 'mi',
+      gridType: 'none',
+      defaultLayout: 'horizontal',
       gridSize: 100,
       compressionLevel: 5,
       theme: 'light',
@@ -367,8 +368,8 @@ export async function initDefaultWorks() {
         content: work.content,
         charStyles: {},
         charAdjustments: {},
-        layout: 'vertical',
-        gridType: 'mi',
+        layout: 'horizontal',
+        gridType: 'none',
         createdAt: Date.now(),
         updatedAt: Date.now()
       })
@@ -584,11 +585,18 @@ export async function getCollectedSamplesMap(): Promise<Record<string, Character
 export async function getSamplesForWork(work: Work): Promise<CharacterSample[]> {
   await loadFromFile()
   const sampleIds = new Set(Object.values(work.charStyles))
-  if (sampleIds.size === 0) return []
 
-  // Return samples that match the IDs, regardless of visibility
+  // Also include samples for title and author from the work's author
+  // We filter out whitespace to avoid unnecessary checks
+  const extraChars = new Set((work.title + (work.author || '')).split('').filter(c => c.trim()))
+
+  // Return samples that match the IDs OR are needed for title/author, regardless of visibility
   // Because they are part of a visible work
-  return store.samples.filter(s => sampleIds.has(s.id))
+  return store.samples.filter(s => {
+      if (sampleIds.has(s.id)) return true
+      if (extraChars.has(s.char) && s.userId === work.userId) return true
+      return false
+  })
 }
 
 export async function getWorkStats(works: Work[]): Promise<Record<string, number>> {
@@ -654,6 +662,30 @@ export async function getCollectedStatsMap(): Promise<Record<string, CharacterSt
     }
   }
   return map
+}
+
+export async function getUnrefinedChars(): Promise<string[]> {
+  const currentUserId = currentUser.value?.id
+  if (!currentUserId) return []
+
+  const mySamples = store.samples.filter(s => s.userId === currentUserId)
+  const charStatus: Record<string, { total: number, adjusted: number }> = {}
+
+  for (const s of mySamples) {
+    if (!charStatus[s.char]) {
+      charStatus[s.char] = { total: 0, adjusted: 0 }
+    }
+    charStatus[s.char].total++
+    if (s.isAdjusted) {
+      charStatus[s.char].adjusted++
+    }
+  }
+
+  // Return chars where adjusted < total (has unadjusted samples)
+  return Object.keys(charStatus).filter(char => {
+      const status = charStatus[char]
+      return status.adjusted < status.total
+  })
 }
 
 // 作品相关操作

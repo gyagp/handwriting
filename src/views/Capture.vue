@@ -4,7 +4,16 @@
 
     <!-- 步骤1: 拍照/上传 -->
     <div v-if="step === 1">
-      <ImageCapture @capture="handleCapture" />
+      <ImageCapture @capture="handleCapture">
+        <template #extra-actions>
+          <div style="display: flex; align-items: center; margin: 0 8px;">
+             <van-radio-group v-model="captureMode" direction="horizontal" icon-size="14px">
+                <van-radio name="auto" style="margin-right: 8px; font-size: 12px;">自动</van-radio>
+                <van-radio name="manual" style="font-size: 12px;">手工</van-radio>
+             </van-radio-group>
+          </div>
+        </template>
+      </ImageCapture>
       <div class="tips">
         <p>提示：</p>
         <ul>
@@ -133,6 +142,8 @@ const isManualMode = ref(false)
 const editorImageRef = ref<HTMLImageElement | null>(null)
 const overlayCanvasRef = ref<HTMLCanvasElement | null>(null)
 
+const captureMode = ref<'auto' | 'manual'>('auto')
+
 // 临时存储待保存的数据
 interface PendingSaveItem extends CharacterSample {
   tempId: string
@@ -149,15 +160,27 @@ const handleCapture = async (file: File) => {
     img.src = url
     await new Promise((resolve) => (img.onload = resolve))
 
-    const results = await processImage(img)
-
-    extractedChars.value = results.map((r, index) => ({
-      id: `temp_${Date.now()}_${index}`,
-      imageData: r.image,
-      boundingBox: { x: r.x, y: r.y, width: r.width, height: r.height }
-    }))
+    if (captureMode.value === 'auto') {
+        isManualMode.value = false
+        const results = await processImage(img)
+        extractedChars.value = results.map((r, index) => ({
+          id: `temp_${Date.now()}_${index}`,
+          imageData: r.image,
+          boundingBox: { x: r.x, y: r.y, width: r.width, height: r.height }
+        }))
+    } else {
+        isManualMode.value = true
+        extractedChars.value = []
+        selectedIds.value.clear()
+    }
 
     step.value = 2
+
+    if (captureMode.value === 'manual') {
+        nextTick(() => {
+            initCanvas()
+        })
+    }
   } catch (error: any) {
     console.error(error)
     showToast(`图像处理失败: ${error.message || '未知错误'}`)
@@ -381,6 +404,8 @@ const handleBatchInput = (val: string) => {
   pendingSaveItems.value.forEach((item, index) => {
     if (index < chars.length) {
       item.char = chars[index]
+    } else {
+      item.char = ''
     }
   })
 }

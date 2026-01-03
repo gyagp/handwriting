@@ -9,22 +9,21 @@
     >
       <template #right>
         <van-button
-          v-if="!isReadOnly"
+          v-if="!isReadOnly && isEdit"
           type="primary"
           size="small"
           @click="save"
         >
-          {{ (work.visibility === 'public' && work.status === 'rejected') ? '重新提交' : ((isPublic && currentUser?.role !== 'admin') ? '提交审核' : '保存') }}
+          {{ (work.visibility === 'public' && work.status === 'rejected') ? '重新提交' : '保存' }}
         </van-button>
 
         <van-button
-          v-if="currentUser?.role !== 'admin' && (!isReadOnly || work.userId === currentUser?.id)"
+          v-if="!isReadOnly && !isEdit"
+          type="primary"
           size="small"
-          icon="replay"
-          @click="refreshRandom"
-          style="margin-left: 8px"
+          @click="save"
         >
-          随机
+          保存
         </van-button>
 
         <van-button
@@ -112,6 +111,18 @@
 
                 <van-tag v-if="work.isRefined" type="success">已精修</van-tag>
                 <van-tag v-else type="default">未精修</van-tag>
+              </div>
+           </template>
+        </van-cell>
+        <van-cell title="字数统计" v-if="isEdit">
+           <template #right-icon>
+              <div style="text-align: right;">
+                  <div style="font-size: 12px; color: #666;">
+                    总字数: {{ totalCharCount }} / 自写: {{ selfWrittenCount }}
+                  </div>
+                  <div v-if="missingChars.length > 0" style="font-size: 12px; color: #999; margin-top: 4px; word-break: break-all;">
+                    缺字: {{ missingChars.join(' ') }}
+                  </div>
               </div>
            </template>
         </van-cell>
@@ -341,13 +352,13 @@ const work = ref<Work>({
   charStyles: {},
   charAdjustments: {},
   layout: 'horizontal',
-  gridType: 'mi',
+  gridType: 'none',
   createdAt: Date.now(),
   updatedAt: Date.now()
 })
 
 const settings = ref<AppSettings>({
-  gridType: 'mi',
+  gridType: 'none',
   gridSize: 100,
   compressionLevel: 5,
   theme: 'light'
@@ -360,11 +371,91 @@ const charList = computed(() => {
   return work.value.content.split('').map((c, i) => ({ char: c, index: i })).filter(item => item.char.trim())
 })
 
+const titleCharList = computed(() => (work.value.title || '').split('').filter(c => c.trim()))
+const authorCharList = computed(() => (work.value.author || '').split('').filter(c => c.trim()))
+
+const totalCharCount = computed(() => {
+    return titleCharList.value.length + authorCharList.value.length + charList.value.length
+})
+
+const selfWrittenCount = computed(() => {
+  if (!work.value.userId) return 0
+
+  const checkChar = (char: string) => {
+      const samples = samplesCache.value[char]
+      if (!samples) return false
+      return samples.some(s => s.userId === work.value.userId)
+  }
+
+  const titleCount = titleCharList.value.filter(checkChar).length
+  const authorCount = authorCharList.value.filter(checkChar).length
+
+  const contentCount = charList.value.filter(item => {
+    const samples = samplesCache.value[item.char]
+    if (!samples) return false
+
+    // If a specific style is selected
+    const selectedId = work.value.charStyles[item.index]
+    if (selectedId) {
+        const s = samples.find(sample => sample.id === selectedId)
+        return s && s.userId === work.value.userId
+    }
+
+    return samples.some(s => s.userId === work.value.userId)
+  }).length
+
+  return titleCount + authorCount + contentCount
+})
+
+const missingChars = computed(() => {
+  if (!work.value.userId) return []
+  const missing = new Set<string>()
+
+  const checkChar = (char: string) => {
+      const samples = samplesCache.value[char]
+      if (!samples) return false
+      return samples.some(s => s.userId === work.value.userId)
+  }
+
+  // Check Title
+  titleCharList.value.forEach(char => {
+      if (!checkChar(char)) missing.add(char)
+  })
+
+  // Check Author
+  authorCharList.value.forEach(char => {
+      if (!checkChar(char)) missing.add(char)
+  })
+
+  // Check Content
+  charList.value.forEach(item => {
+    const char = item.char
+    const samples = samplesCache.value[char]
+    let isSelf = false
+
+    if (samples) {
+        // If a specific style is selected
+        const selectedId = work.value.charStyles[item.index]
+        if (selectedId) {
+            const s = samples.find(sample => sample.id === selectedId)
+            if (s && s.userId === work.value.userId) isSelf = true
+        } else {
+            if (samples.some(s => s.userId === work.value.userId)) isSelf = true
+        }
+    }
+
+    if (!isSelf) missing.add(char)
+  })
+
+  return Array.from(missing).sort()
+})
+
+// Save current settings as default
 const saveAsDefaultStyle = async () => {
   try {
     await saveSettings({
-      gridType: work.value.gridType,
-      defaultLayout: work.value.layout
+      gridType: work.value.gridType || 'mi',
+      defaultLayout: work.value.layout || 'horizontal'
     })
     showToast('已保存为默认样式')
   } catch (e: any) {
@@ -393,8 +484,17 @@ onMounted(async () => {
           isRefined.value = !!w.isRefined
       }
 
+      // Force update layout for unrefined works to match user preference
+      if (!isRefined.value) {
+          if (settings.value.defaultLayout) work.value.layout = settings.value.defaultLayout
+          if (settings.value.gridType) work.value.gridType = settings.value.gridType
+      }
+
       if (!work.value.gridType) {
         work.value.gridType = settings.value.gridType
+      }
+      if (!work.value.layout) {
+        work.value.layout = settings.value.defaultLayout || 'horizontal'
       }
 
       // Check permissions
@@ -407,14 +507,18 @@ onMounted(async () => {
         // Author can always edit their own work, even if published
       }
 
-      if (isReadOnly.value) {
-         // Apply viewer preferences
-         if (settings.value.defaultLayout) work.value.layout = settings.value.defaultLayout
-         if (settings.value.gridType) work.value.gridType = settings.value.gridType
+      // Load samples used in the work (especially if it's not mine, or read only)
+      // We need this to ensure we have the author's samples for title/author/content
+      if (w.userId !== currentUser.value?.id || isReadOnly.value) {
+         if (isReadOnly.value) {
+             // Apply viewer preferences only in read-only mode
+             if (settings.value.defaultLayout) work.value.layout = settings.value.defaultLayout
+             if (settings.value.gridType) work.value.gridType = settings.value.gridType
 
-         // Load my rating
-         const myScore = getMyRating(w.id, 'work')
-         if (myScore) ratingScore.value = myScore / 2
+             // Load my rating
+             const myScore = getMyRating(w.id, 'work')
+             if (myScore) ratingScore.value = myScore / 2
+         }
 
          // Load samples used in the work (even if private)
          const workSamples = await getSamplesForWork(w)
@@ -639,25 +743,62 @@ const preloadSamples = async (text: string) => {
 }
 
 const getMetaDisplayContent = (char: string) => {
-  // For title/author, use my best sample
-  const samples = getUsableSamples(char)
-  if (samples && samples.length > 0) {
-    return samples[0].svgPath
+  const samples = samplesCache.value[char] || []
+
+  // 1. Try to find author's sample
+  if (work.value.userId) {
+    // Find a sample by the author.
+    // Ideally we'd pick the "best" one (highest score or refined), but finding ANY is a good start.
+    // If we have multiple, maybe pick the one with `isRefined`?
+    const authorSamples = samples.filter(s => s.userId === work.value.userId)
+    if (authorSamples.length > 0) {
+        // Sort by refined, then score
+        authorSamples.sort((a, b) => {
+            if (a.isRefined !== b.isRefined) return a.isRefined ? -1 : 1
+            return (b.score || 0) - (a.score || 0)
+        })
+        return authorSamples[0].svgPath
+    }
+  }
+
+  // 2. Fallback to my best sample (viewer's sample)
+  const mySamples = getUsableSamples(char)
+  if (mySamples && mySamples.length > 0) {
+    return mySamples[0].svgPath
   }
   return char
 }
 
 const getMetaDisplayViewBox = (char: string) => {
-  const samples = getUsableSamples(char)
-  if (samples && samples.length > 0) {
-    return samples[0].svgViewBox
+  const samples = samplesCache.value[char] || []
+
+  // 1. Try to find author's sample
+  if (work.value.userId) {
+    const authorSamples = samples.filter(s => s.userId === work.value.userId)
+    if (authorSamples.length > 0) {
+        // Sort by refined, then score
+        authorSamples.sort((a, b) => {
+            if (a.isRefined !== b.isRefined) return a.isRefined ? -1 : 1
+            return (b.score || 0) - (a.score || 0)
+        })
+        return authorSamples[0].svgViewBox
+    }
+  }
+
+  // 2. Fallback to my best sample
+  const mySamples = getUsableSamples(char)
+  if (mySamples && mySamples.length > 0) {
+    return mySamples[0].svgViewBox
   }
   return undefined
 }
 
 const getMetaDisplayType = (char: string) => {
-  const samples = getUsableSamples(char)
-  return (samples && samples.length > 0) ? 'none' : 'text'
+  // Check if we have ANY sample to display (Author's or Mine)
+  const content = getMetaDisplayContent(char)
+  // If content is the char itself (and length is 1), it's text.
+  // SVG path is usually much longer.
+  return (content && content.length > 10) ? 'none' : 'text'
 }
 
 const submitRating = async () => {
@@ -1009,7 +1150,7 @@ const save = async () => {
   right: 2px;
   width: 6px;
   height: 6px;
-  background-color: #ccc;
+  background-color: #1989fa;
   border-radius: 50%;
 }
 

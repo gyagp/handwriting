@@ -7,73 +7,63 @@
       @click-left="$router.back()"
     />
 
-    <div class="main-display card">
-      <GridDisplay
-        :type="settings.gridType"
-        :size="280"
-        :content="currentSample?.svgPath || char"
-        :viewBox="currentSample?.svgViewBox"
-      />
-      <div class="actions" v-if="currentSample">
-        <van-button size="small" icon="edit" @click="openEdit" v-if="canEdit">调整</van-button>
-        <van-button
-          size="small"
-          icon="star-o"
-          @click="openRating"
-          v-if="!canEdit && currentUser?.role !== 'guest'"
-        >
-          {{ myCurrentRating ? `评分 (${myCurrentRating})` : '评分' }}
-        </van-button>
-      </div>
-      <div class="sample-info-extra" v-if="currentSample && !canEdit">
-        书写者: {{ getUsername(currentSample.userId) }}
-      </div>
-    </div>
+    <!-- Unrefined Queue -->
+    <!-- Moved to CharacterRefinePanel -->
 
-    <div class="info-section card">
-      <div class="info-row">
-        <span class="label">拼音：</span>
-        <span class="value">{{ charInfo?.pinyin }}</span>
-      </div>
-      <div class="info-row">
-        <span class="label">部首：</span>
-        <span class="value">{{ charInfo?.radical }}</span>
-      </div>
-      <div class="info-row">
-        <span class="label">笔画：</span>
-        <span class="value">{{ charInfo?.strokes }}</span>
-      </div>
-    </div>
-
-    <div class="samples-section">
-      <div v-if="mySamples.length > 0 || currentUser?.role !== 'admin'">
-        <h3>我的书写 ({{ mySamples.length }})</h3>
-        <div class="samples-list">
-          <div
-            v-for="sample in mySamples"
-            :key="sample.id"
-            class="sample-item"
-            :class="{ active: currentSample?.id === sample.id }"
-            @click="currentSample = sample"
+    <div class="main-display card" v-if="!canEdit">
+      <!-- Read-only View -->
+      <div>
+        <GridDisplay
+          :type="settings.gridType"
+          :size="280"
+          :content="currentSample?.svgPath || char"
+          :viewBox="currentSample?.svgViewBox"
+        />
+        <div class="actions" v-if="currentSample">
+          <van-button
+            size="small"
+            icon="star-o"
+            @click="openRating"
+            v-if="currentUser?.role !== 'guest'"
           >
-            <GridDisplay :size="60" :content="sample.svgPath" :viewBox="sample.svgViewBox" />
-            <div class="sample-score" v-if="sample.score">{{ sample.score }}</div>
-            <van-icon name="lock" v-if="sample.visibility === 'private'" class="private-icon" />
-            <van-icon
-              name="cross"
-              class="delete-btn"
-              @click.stop="handleDelete(sample)"
-              v-if="canDelete(sample)"
-            />
-          </div>
-
-          <div class="add-btn" @click="$router.push('/capture')" v-if="currentUser?.role !== 'admin'">
-            <van-icon name="plus" />
-          </div>
+            {{ myCurrentRating ? `评分 (${myCurrentRating})` : '评分' }}
+          </van-button>
+        </div>
+        <div class="sample-info-extra" v-if="currentSample">
+          书写者: {{ getUsername(currentSample.userId) }}
         </div>
       </div>
+    </div>
 
-      <div v-if="otherSamples.length > 0" style="margin-top: 24px;">
+    <!-- Adjustment View -->
+    <CharacterRefinePanel
+      v-else
+      :char="char"
+      @select-char="(c) => $router.replace(`/character/${c}`)"
+    />
+
+    <div class="samples-section" v-if="!canEdit">
+      <div v-if="mySamples.length > 0 || currentUser?.role !== 'admin'">
+        <h3>我的书写 ({{ mySamples.length }})</h3>
+        <!-- Read-only view of my samples if for some reason I can't edit (e.g. admin viewing user?) -->
+        <!-- Actually if I have samples, canEdit is true. So this block is mostly for admin viewing others or guest -->
+        <div class="samples-list">
+            <div
+              v-for="sample in mySamples"
+              :key="sample.id"
+              class="sample-item"
+              :class="{ active: currentSample?.id === sample.id }"
+              @click="onSelectSample(sample)"
+            >
+              <GridDisplay :size="60" :content="sample.svgPath" :viewBox="sample.svgViewBox" />
+              <div class="sample-score" v-if="sample.score">{{ sample.score }}</div>
+            </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="samples-section" v-if="!canEdit && otherSamples.length > 0">
+      <div style="margin-top: 24px;">
         <h3>公开书写 ({{ otherSamples.length }})</h3>
         <div class="samples-list">
           <div
@@ -81,7 +71,7 @@
             :key="sample.id"
             class="sample-item"
             :class="{ active: currentSample?.id === sample.id }"
-            @click="currentSample = sample"
+            @click="onSelectSample(sample)"
           >
             <GridDisplay :size="60" :content="sample.svgPath" :viewBox="sample.svgViewBox" />
             <div class="sample-score" v-if="sample.score">{{ sample.score }}</div>
@@ -98,16 +88,6 @@
       </div>
     </div>
 
-    <!-- 编辑弹窗 -->
-    <CharacterAdjustmentDialog
-      v-model:show="showEdit"
-      :content="currentSample?.svgPath || ''"
-      :char="char"
-      :grid-type="settings.gridType"
-      :initial-data="editForm"
-      @save="saveEdit"
-    />
-
     <van-dialog v-model:show="showRatingDialog" title="评分" show-cancel-button @confirm="submitRating">
       <div style="display: flex; justify-content: center; padding: 20px;">
         <van-rate v-model="ratingScore" :count="5" allow-half size="30" />
@@ -118,14 +98,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
-import { getSamplesByChar, deleteSample, getSettings, saveSample, saveRating, getMyRating, currentUser, getUsername } from '@/services/db'
-import { getPinyin, getRadical, getStrokes, getGB2312Code } from '@/data/gb2312-generator'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
+import { getSamplesByChar, deleteSample, getSettings, saveSample, saveRating, getMyRating, currentUser, getUsername, getCollectedStatsMap, getUnrefinedChars } from '@/services/db'
+import { getPinyin, getRadical, getStrokes, getGB2312Code, gb2312AllChars } from '@/data/gb2312-generator'
 import GridDisplay from '@/components/GridDisplay.vue'
-import CharacterAdjustmentDialog from '@/components/CharacterAdjustmentDialog.vue'
-import type { CharacterSample, AppSettings } from '@/types'
+import type { CharacterSample, AppSettings, GridType } from '@/types'
 import { showDialog, showToast } from 'vant'
 import { toRaw } from 'vue'
+
+const router = useRouter()
 
 const props = defineProps<{
   char: string
@@ -133,8 +115,12 @@ const props = defineProps<{
 
 const samples = ref<CharacterSample[]>([])
 const currentSample = ref<CharacterSample | null>(null)
+const collectedList = ref<string[]>([])
+const unrefinedList = ref<string[]>([])
 
 const mySamples = computed(() => samples.value.filter(s => s.userId === currentUser.value?.id))
+const myRefinedSamples = computed(() => mySamples.value.filter(s => s.isAdjusted))
+const myUnrefinedSamples = computed(() => mySamples.value.filter(s => !s.isAdjusted))
 const otherSamples = computed(() => samples.value.filter(s => s.userId !== currentUser.value?.id))
 
 const settings = ref<AppSettings>({
@@ -144,7 +130,7 @@ const settings = ref<AppSettings>({
   theme: 'light'
 })
 
-const showEdit = ref(false)
+const currentGridType = ref<GridType>('mi')
 const editForm = ref({
   scale: 1.0,
   offsetX: 0,
@@ -189,30 +175,38 @@ const submitRating = async () => {
   await loadSamples()
 }
 
-const openEdit = () => {
-  if (!currentSample.value) return
+const previewViewBox = computed(() => {
+  const { scale, offsetX, offsetY } = editForm.value
+  const width = 100 / scale
+  const height = 100 / scale
+  const minX = 50 - offsetX - width / 2
+  const minY = 50 - offsetY - height / 2
+  return `${minX} ${minY} ${width} ${height}`
+})
 
-  const viewBox = currentSample.value.svgViewBox || '0 0 100 100'
-  const [minX, minY, width, height] = viewBox.split(' ').map(Number)
+watch(currentSample, (newSample) => {
+  if (newSample && canEdit.value) {
+      const viewBox = newSample.svgViewBox || '0 0 100 100'
+      const [minX, minY, width, height] = viewBox.split(' ').map(Number)
+      const scale = 100 / width
+      const offsetX = 50 - width / 2 - minX
+      const offsetY = 50 - height / 2 - minY
 
-  // 反向计算
-  const scale = 100 / width
-  const offsetX = 50 - width / 2 - minX
-  const offsetY = 50 - height / 2 - minY
-
-  editForm.value = {
-    scale: Number(scale.toFixed(2)),
-    offsetX: Number(offsetX.toFixed(2)),
-    offsetY: Number(offsetY.toFixed(2)),
-    isAdjusted: !!currentSample.value.isAdjusted
+      editForm.value = {
+        scale: Number(scale.toFixed(2)),
+        offsetX: Number(offsetX.toFixed(2)),
+        offsetY: Number(offsetY.toFixed(2)),
+        isAdjusted: !!newSample.isAdjusted
+      }
+      // Default grid type for editing
+      currentGridType.value = 'mi'
   }
-  showEdit.value = true
-}
+}, { immediate: true })
 
-const saveEdit = async (data: { scale: number; offsetX: number; offsetY: number; isAdjusted: boolean }) => {
+const saveAdjustment = async () => {
   if (!currentSample.value) return
 
-  const { scale, offsetX, offsetY, isAdjusted } = data
+  const { scale, offsetX, offsetY, isAdjusted } = editForm.value
   const width = 100 / scale
   const height = 100 / scale
   const minX = 50 - offsetX - width / 2
@@ -236,6 +230,66 @@ const saveEdit = async (data: { scale: number; offsetX: number; offsetY: number;
   showToast('保存成功')
 }
 
+// 交互逻辑
+const isDragging = ref(false)
+const startPos = ref({ x: 0, y: 0 })
+const startOffset = ref({ x: 0, y: 0 })
+
+const startDrag = (e: MouseEvent | TouchEvent) => {
+  isDragging.value = true
+  const clientX = 'touches' in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX
+  const clientY = 'touches' in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY
+
+  startPos.value = { x: clientX, y: clientY }
+  startOffset.value = { x: editForm.value.offsetX, y: editForm.value.offsetY }
+
+  window.addEventListener('mousemove', onDrag)
+  window.addEventListener('touchmove', onDrag, { passive: false })
+  window.addEventListener('mouseup', stopDrag)
+  window.addEventListener('touchend', stopDrag)
+}
+
+const onDrag = (e: MouseEvent | TouchEvent) => {
+  if (!isDragging.value) return
+  if (e.cancelable) e.preventDefault()
+
+  const clientX = 'touches' in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX
+  const clientY = 'touches' in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY
+
+  const deltaX = clientX - startPos.value.x
+  const deltaY = clientY - startPos.value.y
+
+  const scale = editForm.value.scale
+  // Adjust sensitivity based on display size (280px) vs coordinate system (100 units)
+  // 280px = 100 units => 1px = 100/280 units ~= 0.35 units
+  const svgDeltaX = deltaX * (100 / 280) / scale
+  const svgDeltaY = deltaY * (100 / 280) / scale
+
+  let newOffsetX = startOffset.value.x + svgDeltaX
+  let newOffsetY = startOffset.value.y + svgDeltaY
+
+  newOffsetX = Math.max(-200, Math.min(200, newOffsetX))
+  newOffsetY = Math.max(-200, Math.min(200, newOffsetY))
+
+  editForm.value.offsetX = Number(newOffsetX.toFixed(2))
+  editForm.value.offsetY = Number(newOffsetY.toFixed(2))
+}
+
+const stopDrag = () => {
+  isDragging.value = false
+  window.removeEventListener('mousemove', onDrag)
+  window.removeEventListener('touchmove', onDrag)
+  window.removeEventListener('mouseup', stopDrag)
+  window.removeEventListener('touchend', stopDrag)
+}
+
+const handleWheel = (e: WheelEvent) => {
+  const delta = e.deltaY > 0 ? -0.05 : 0.05
+  let newScale = editForm.value.scale + delta
+  newScale = Math.max(0.2, Math.min(2.0, newScale))
+  editForm.value.scale = Number(newScale.toFixed(2))
+}
+
 const charInfo = computed(() => {
   if (!props.char) return null
   return {
@@ -247,24 +301,29 @@ const charInfo = computed(() => {
   }
 })
 
-onMounted(async () => {
-  const s = await getSettings()
-  if (s) settings.value = s
-
-  await loadSamples()
-})
-
 watch(() => props.char, () => {
   loadSamples()
 })
 
+const onSelectSample = (sample: CharacterSample) => {
+  currentSample.value = sample
+}
+
 const loadSamples = async () => {
   samples.value = await getSamplesByChar(props.char)
   if (samples.value.length > 0) {
-    currentSample.value = samples.value[0]
+    // 优先选中未精修的样本
+    const myUnrefined = samples.value.find(s => s.userId === currentUser.value?.id && !s.isAdjusted)
+    if (myUnrefined) {
+      currentSample.value = myUnrefined
+    } else {
+      currentSample.value = samples.value[0]
+    }
   } else {
     currentSample.value = null
   }
+  // Refresh unrefined list when samples change (e.g. after save)
+  unrefinedList.value = await getUnrefinedChars()
 }
 
 const handleDelete = (sample: CharacterSample) => {
@@ -280,14 +339,143 @@ const handleDelete = (sample: CharacterSample) => {
     }
   })
 }
+
+onMounted(async () => {
+  const s = await getSettings()
+  if (s) settings.value = s
+
+  await loadSamples()
+  unrefinedList.value = await getUnrefinedChars()
+})
 </script>
 
 <style scoped>
+.unrefined-queue {
+  padding: 12px;
+}
+
+.queue-header {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.queue-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 80px; /* Approx 2 rows */
+  overflow-y: auto;
+}
+
+.queue-item {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f5f5;
+  border-radius: 4px;
+  font-size: 16px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.queue-item.active {
+  background: var(--primary-color);
+  color: #fff;
+}
+
 .main-display {
   display: flex;
   justify-content: center;
   padding: 20px;
   margin-top: 16px;
+  background: #f8f8f8;
+}
+
+.adjustment-panel {
+  padding: 16px;
+  background: #fff;
+  border-top: 1px solid #eee;
+}
+
+.control-group {
+  margin-bottom: 16px;
+}
+
+.control-label {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 8px;
+  display: block;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.grid-selector {
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: center;
+}
+
+.preview-box {
+  position: relative;
+  width: 280px;
+  height: 280px;
+  margin: 0 auto 20px;
+  border: 1px solid #eee;
+  overflow: hidden;
+  cursor: move;
+}
+
+.background-char {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.3;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.background-char :deep(.text-content) {
+  font-family: "KaiTi", "STKaiti", "楷体", serif;
+}
+
+.foreground-char {
+  position: relative;
+  z-index: 1;
+  background-color: transparent !important;
+}
+
+.controls {
+  padding: 0 16px;
+}
+
+.control-item {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 12px;
+}
+
+.control-item span {
+  width: 40px;
+  font-size: 14px;
+  color: #666;
+}
+
+.control-item .van-slider {
+  flex: 1;
+  margin: 0 12px;
 }
 
 .info-section {
@@ -319,6 +507,13 @@ const handleDelete = (sample: CharacterSample) => {
   margin-bottom: 12px;
   font-size: 16px;
   color: #666;
+}
+
+.sub-title {
+  margin: 10px 0 8px;
+  font-size: 14px;
+  color: #888;
+  font-weight: normal;
 }
 
 .samples-list {

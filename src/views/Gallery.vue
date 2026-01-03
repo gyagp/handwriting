@@ -6,235 +6,91 @@
     </div>
 
     <van-sticky>
-      <van-search v-model="searchText" placeholder="搜索作品标题或作者" background="var(--bg-color)" />
+      <div style="background: var(--bg-color)">
+        <van-search v-model="searchText" placeholder="搜索作品标题或作者" background="transparent" />
+        <div class="filter-bar" v-if="!isAdmin" style="padding: 0 16px 10px;">
+          <van-checkbox-group v-model="filterTypes" direction="horizontal">
+            <van-checkbox name="refined" shape="square" style="margin-right: 20px">已精修</van-checkbox>
+            <van-checkbox name="unrefined" shape="square">未精修</van-checkbox>
+          </van-checkbox-group>
+        </div>
+      </div>
     </van-sticky>
 
-    <van-tabs v-model:active="activeTab" sticky :offset-top="54" v-if="!isAdmin">
-      <van-tab title="全部">
-        <div class="works-list">
-          <div
-            v-for="work in allWorks"
-            :key="work.id"
-            class="work-item card"
-            @click="editWork(work)"
-          >
-            <div class="work-header">
-              <div class="work-title-row">
-                <div class="title-author-container">
-                  <div class="title-display">
-                    <GridDisplay
-                      v-for="(char, idx) in work.title"
-                      :key="'t'+idx"
-                      :size="24"
-                      :content="getMetaCharContent(char)"
-                      :viewBox="getMetaCharViewBox(char)"
-                      :type="getMetaCharType(char)"
-                    />
-                  </div>
-                  <div class="author-display" v-if="work.author">
-                    <GridDisplay
-                      v-for="(char, idx) in work.author"
-                      :key="'a'+idx"
-                      :size="16"
-                      :content="getMetaCharContent(char)"
-                      :viewBox="getMetaCharViewBox(char)"
-                      :type="getMetaCharType(char)"
-                      style="color: #666;"
-                    />
-                  </div>
-                </div>
-                <div class="work-meta">
-                  <span class="stats" v-if="work.userId === currentUser?.id">总字数: {{ getWorkTotalCount(work) }} / 自写: {{ workStats[work.id] || 0 }}</span>
-                  <span class="author-tag" v-if="work.userId !== currentUser?.id">上传人: {{ getUsername(work.userId) }}</span>
-
-                  <!-- 状态标签 -->
-                  <van-tag v-if="work.isRefined" type="success" style="margin-left: 5px">已精修</van-tag>
-                  <van-tag v-else type="default" style="margin-left: 5px">未精修</van-tag>
-
-                  <!-- 可见性标签 -->
-                  <van-tag v-if="work.status === 'pending'" type="warning" style="margin-left: 5px">审核中</van-tag>
-                  <van-tag v-else-if="work.status === 'rejected'" type="danger" style="margin-left: 5px">已驳回</van-tag>
-                  <van-tag v-else-if="isWorkPublic(work)" type="primary" style="margin-left: 5px">公开</van-tag>
-                  <van-tag v-else type="default" style="margin-left: 5px">私有</van-tag>
-
-                  <van-tag v-if="work.userId !== currentUser?.id && myTitles.has(work.title)" type="primary" plain style="margin-left: 5px">已收集</van-tag>
-                  <span v-if="work.score" style="margin-left: 8px; color: #f7b500; font-size: 12px;">★ {{ work.score }}</span>
-                </div>
+    <div class="works-list" v-if="!isAdmin">
+      <div
+        v-for="work in filteredWorks"
+        :key="work.id"
+        class="work-item card"
+        @click="editWork(work)"
+      >
+        <div class="work-header">
+          <div class="work-title-row">
+            <div class="title-author-container">
+              <div class="title-display">
+                <GridDisplay
+                  v-for="(char, idx) in work.title"
+                  :key="'t'+idx"
+                  :size="24"
+                  :content="getMetaCharContent(char)"
+                  :viewBox="getMetaCharViewBox(char)"
+                  :type="getMetaCharType(char)"
+                />
               </div>
-              <van-icon name="arrow" color="#ccc" />
-            </div>
-
-            <div class="work-preview-line">
-              <GridDisplay
-                v-for="(char, idx) in getPreviewChars(work)"
-                :key="idx"
-                :size="32"
-                :content="getCharContent(work, idx, char)"
-                :viewBox="getCharViewBox(work, idx, char)"
-                :type="'none'"
-              />
-            </div>
-
-            <div class="work-actions" style="margin-top: 10px; display: flex; justify-content: flex-end;">
-               <van-button v-if="work.userId === currentUser?.id && (work.visibility === 'private' || work.status !== 'published')" size="small" type="danger" plain @click.stop="handleRemove(work)">
-                   删除
-               </van-button>
-            </div>
-          </div>
-          <div v-if="allWorks.length === 0" class="empty-tip">
-            暂无作品
-          </div>
-        </div>
-      </van-tab>
-      <van-tab title="已精修">
-        <div class="works-list">
-          <div
-            v-for="work in myRefinedWorks"
-            :key="work.id"
-            class="work-item card"
-            @click="editWork(work)"
-          >
-            <div class="work-header">
-              <div class="work-title-row">
-                <div class="title-author-container">
-                  <div class="title-display">
-                    <GridDisplay
-                      v-for="(char, idx) in work.title"
-                      :key="'t'+idx"
-                      :size="24"
-                      :content="getMetaCharContent(char)"
-                      :viewBox="getMetaCharViewBox(char)"
-                      :type="getMetaCharType(char)"
-                    />
-                  </div>
-                  <div class="author-display" v-if="work.author">
-                    <GridDisplay
-                      v-for="(char, idx) in work.author"
-                      :key="'a'+idx"
-                      :size="16"
-                      :content="getMetaCharContent(char)"
-                      :viewBox="getMetaCharViewBox(char)"
-                      :type="getMetaCharType(char)"
-                      style="color: #666;"
-                    />
-                  </div>
-                </div>
-                <div class="work-meta">
-                  <span class="stats">总字数: {{ getWorkTotalCount(work) }} / 自写: {{ workStats[work.id] || 0 }}</span>
-
-                  <!-- 状态标签 -->
-                  <van-tag v-if="work.isRefined" type="success" style="margin-left: 5px">已精修</van-tag>
-                  <van-tag v-else type="default" style="margin-left: 5px">未精修</van-tag>
-
-                  <!-- 可见性标签 -->
-                  <van-tag v-if="isWorkPublic(work)" type="primary" style="margin-left: 5px">公开</van-tag>
-                  <van-tag v-else type="warning" style="margin-left: 5px">私有</van-tag>
-
-                  <span v-if="work.score" style="margin-left: 8px; color: #f7b500; font-size: 12px;">★ {{ work.score }}</span>
-                </div>
+              <div class="author-display" v-if="work.author">
+                <GridDisplay
+                  v-for="(char, idx) in work.author"
+                  :key="'a'+idx"
+                  :size="16"
+                  :content="getMetaCharContent(char)"
+                  :viewBox="getMetaCharViewBox(char)"
+                  :type="getMetaCharType(char)"
+                  style="color: #666;"
+                />
               </div>
-              <van-icon name="arrow" color="#ccc" />
             </div>
+            <div class="work-meta">
+              <span class="stats" v-if="work.userId === currentUser?.id">总字数: {{ getWorkTotalCount(work) }} / 自写: {{ workStats[work.id] || 0 }}</span>
+              <span class="author-tag" v-if="work.userId !== currentUser?.id">上传人: {{ getUsername(work.userId) }}</span>
 
-            <div class="work-preview-line">
-              <GridDisplay
-                v-for="(char, idx) in getPreviewChars(work)"
-                :key="idx"
-                :size="32"
-                :content="getCharContent(work, idx, char)"
-                :viewBox="getCharViewBox(work, idx, char)"
-                :type="'none'"
-              />
-            </div>
+              <!-- 状态标签 -->
+              <van-tag v-if="work.isRefined" type="success" style="margin-left: 5px">已精修</van-tag>
+              <van-tag v-else type="default" style="margin-left: 5px">未精修</van-tag>
 
-            <div class="work-actions" style="margin-top: 10px; display: flex; justify-content: flex-end;">
-               <van-button size="small" type="danger" plain @click.stop="handleRemove(work)">
-                   删除
-               </van-button>
+              <!-- 可见性标签 -->
+              <van-tag v-if="work.status === 'pending'" type="warning" style="margin-left: 5px">审核中</van-tag>
+              <van-tag v-else-if="work.status === 'rejected'" type="danger" style="margin-left: 5px">已驳回</van-tag>
+              <van-tag v-else-if="isWorkPublic(work)" type="primary" style="margin-left: 5px">公开</van-tag>
+              <van-tag v-else type="default" style="margin-left: 5px">私有</van-tag>
+
+              <van-tag v-if="work.userId !== currentUser?.id && myTitles.has(work.title)" type="primary" plain style="margin-left: 5px">已收集</van-tag>
+              <span v-if="work.score" style="margin-left: 8px; color: #f7b500; font-size: 12px;">★ {{ work.score }}</span>
             </div>
           </div>
-          <div v-if="myRefinedWorks.length === 0" class="empty-tip">
-            暂无已精修作品
-          </div>
+          <van-icon name="arrow" color="#ccc" />
         </div>
-      </van-tab>
-      <van-tab title="未精修">
-        <div class="works-list">
-          <div
-            v-for="work in myUnrefinedWorks"
-            :key="work.id"
-            class="work-item card"
-            @click="editWork(work)"
-          >
-            <div class="work-header">
-              <div class="work-title-row">
-                <div class="title-author-container">
-                  <div class="title-display">
-                    <GridDisplay
-                      v-for="(char, idx) in work.title"
-                      :key="'t'+idx"
-                      :size="24"
-                      :content="getMetaCharContent(char)"
-                      :viewBox="getMetaCharViewBox(char)"
-                      :type="getMetaCharType(char)"
-                    />
-                  </div>
-                  <div class="author-display" v-if="work.author">
-                    <GridDisplay
-                      v-for="(char, idx) in work.author"
-                      :key="'a'+idx"
-                      :size="16"
-                      :content="getMetaCharContent(char)"
-                      :viewBox="getMetaCharViewBox(char)"
-                      :type="getMetaCharType(char)"
-                      style="color: #666;"
-                    />
-                  </div>
-                </div>
-                <div class="work-meta">
-                  <span class="stats">总字数: {{ getWorkTotalCount(work) }} / 自写: {{ workStats[work.id] || 0 }}</span>
-                  <span class="author-tag" v-if="work.userId !== currentUser?.id">上传人: {{ getUsername(work.userId) }}</span>
 
-                  <!-- 状态标签 -->
-                  <van-tag v-if="work.isRefined" type="success" style="margin-left: 5px">已精修</van-tag>
-                  <van-tag v-else type="default" style="margin-left: 5px">未精修</van-tag>
-
-                  <!-- 可见性标签 -->
-                  <van-tag v-if="work.status === 'pending'" type="warning" style="margin-left: 5px">审核中</van-tag>
-                  <van-tag v-else-if="work.status === 'rejected'" type="danger" style="margin-left: 5px">已驳回</van-tag>
-                  <van-tag v-else-if="work.visibility === 'public'" type="primary" style="margin-left: 5px">作品公开</van-tag>
-                  <van-tag v-else-if="work.isRefined && work.userId !== currentUser?.id" type="success" plain style="margin-left: 5px">书写公开</van-tag>
-                  <van-tag v-else type="default" style="margin-left: 5px">私有</van-tag>
-
-                  <span v-if="work.score" style="margin-left: 8px; color: #f7b500; font-size: 12px;">★ {{ work.score }}</span>
-                </div>
-              </div>
-              <van-icon name="arrow" color="#ccc" />
-            </div>
-
-            <div class="work-preview-line">
-              <GridDisplay
-                v-for="(char, idx) in getPreviewChars(work)"
-                :key="idx"
-                :size="32"
-                :content="getCharContent(work, idx, char)"
-                :viewBox="getCharViewBox(work, idx, char)"
-                :type="'none'"
-              />
-            </div>
-
-            <div class="work-actions" style="margin-top: 10px; display: flex; justify-content: flex-end;">
-               <van-button v-if="work.userId === currentUser?.id" size="small" type="danger" plain @click.stop="handleRemove(work)">
-                   删除
-               </van-button>
-            </div>
-          </div>
-          <div v-if="myUnrefinedWorks.length === 0" class="empty-tip">
-            暂无未精修作品
-          </div>
+        <div class="work-preview-line">
+          <GridDisplay
+            v-for="(char, idx) in getPreviewChars(work)"
+            :key="idx"
+            :size="32"
+            :content="getCharContent(work, idx, char)"
+            :viewBox="getCharViewBox(work, idx, char)"
+            :type="'none'"
+          />
         </div>
-      </van-tab>
-    </van-tabs>
+
+        <div class="work-actions" style="margin-top: 10px; display: flex; justify-content: flex-end;">
+           <van-button v-if="work.userId === currentUser?.id && (work.visibility === 'private' || work.status !== 'published')" size="small" type="danger" plain @click.stop="handleRemove(work)">
+               删除
+           </van-button>
+        </div>
+      </div>
+      <div v-if="filteredWorks.length === 0" class="empty-tip">
+        暂无作品
+      </div>
+    </div>
 
     <van-tabs v-model:active="activeTab" sticky :offset-top="54" v-else>
       <van-tab title="公开作品集">
@@ -287,6 +143,12 @@
                 :viewBox="getCharViewBox(work, idx, char)"
                 :type="'none'"
               />
+            </div>
+
+            <div class="work-actions" style="margin-top: 10px; display: flex; justify-content: flex-end;">
+               <van-button size="small" type="danger" plain @click.stop="handleRemove(work)">
+                   删除
+               </van-button>
             </div>
           </div>
           <div v-if="publicWorks.length === 0" class="empty-tip">
@@ -358,6 +220,7 @@
             <div class="admin-actions" style="margin-top: 10px; display: flex; gap: 10px; justify-content: flex-end;">
                <van-button size="small" type="success" @click.stop="handleApprove(work, true)">通过</van-button>
                <van-button size="small" type="danger" @click.stop="handleApprove(work, false)">驳回</van-button>
+               <van-button size="small" type="danger" plain @click.stop="handleRemove(work)">删除</van-button>
             </div>
           </div>
           <div v-if="pendingWorks.length === 0" class="empty-tip">
@@ -383,6 +246,7 @@ const samplesMap = ref<Record<string, CharacterSample>>({})
 const workStats = ref<Record<string, number>>({})
 const activeTab = ref(0)
 const searchText = ref('')
+const filterTypes = ref(['refined', 'unrefined'])
 
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
 
@@ -443,6 +307,18 @@ const myUnrefinedWorks = computed(() => {
   return [...mine, ...availableTemplates]
 })
 
+const filteredWorks = computed(() => {
+  let result: Work[] = []
+  if (filterTypes.value.includes('refined')) {
+    result.push(...myRefinedWorks.value)
+  }
+  if (filterTypes.value.includes('unrefined')) {
+    result.push(...myUnrefinedWorks.value)
+  }
+  // Sort by updated time desc
+  return result.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+})
+
 const allWorks = computed(() => works.value.filter(w => {
   // Show my works (private/public) AND other's public works
   if (w.userId === currentUser.value?.id && w.authorDeleted) return false
@@ -450,7 +326,7 @@ const allWorks = computed(() => works.value.filter(w => {
 }))
 
 const handleRemove = async (work: Work) => {
-  if (work.visibility === 'public' && work.status === 'published') {
+  if (!isAdmin.value && work.visibility === 'public' && work.status === 'published') {
     showToast('已公开的作品无法删除')
     return
   }

@@ -16,6 +16,7 @@
           </template>
           右转
         </van-button>
+        <slot name="extra-actions"></slot>
         <van-button type="primary" icon="success" size="small" @click="confirm">使用</van-button>
       </div>
     </div>

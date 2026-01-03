@@ -19,7 +19,7 @@
       </div>
     </van-sticky>
 
-    <div class="char-grid container">
+    <div class="char-grid container" v-if="activeTab !== 'collected-unadjusted'">
       <CharacterCard
         v-for="char in displayList"
         :key="char.code"
@@ -35,11 +35,23 @@
       />
     </div>
 
-    <div v-if="displayList.length === 0" class="empty-tip">
+    <div v-else class="refine-container container">
+      <div v-if="displayList.length > 0">
+        <CharacterRefinePanel
+          :char="currentRefineChar || displayList[0].char"
+          @select-char="(c) => currentRefineChar = c"
+        />
+      </div>
+      <div v-else class="empty-tip">
+        没有待精修的汉字
+      </div>
+    </div>
+
+    <div v-if="displayList.length === 0 && activeTab !== 'collected-unadjusted'" class="empty-tip">
       没有找到相关汉字
     </div>
 
-    <div v-if="displayList.length < filteredList.length" class="load-more" @click="loadMore">
+    <div v-if="displayList.length < filteredList.length && activeTab !== 'collected-unadjusted'" class="load-more" @click="loadMore">
       加载更多...
     </div>
   </div>
@@ -51,6 +63,7 @@ import { useRouter } from 'vue-router'
 import { getCollectedStatsMap, getSettings, currentUser } from '@/services/db'
 import { gb2312AllChars, getPinyin, getGB2312Code, getStrokes, getRadical, punctuationChars } from '@/data/gb2312-generator'
 import CharacterCard from '@/components/CharacterCard.vue'
+import CharacterRefinePanel from '@/components/CharacterRefinePanel.vue'
 import type { CharacterInfo, AppSettings, CharacterStats } from '@/types'
 
 const router = useRouter()
@@ -59,6 +72,7 @@ const activeTab = ref('all')
 const collectedMap = ref<Record<string, CharacterStats>>({})
 const pageSize = 50
 const currentPage = ref(1)
+const currentRefineChar = ref<string>('')
 
 const settings = ref<AppSettings>({
   gridType: 'mi',
@@ -126,7 +140,9 @@ const filteredList = computed(() => {
   } else if (activeTab.value === 'collected-unadjusted') {
     list = list.filter(c => {
       const stats = collectedMap.value[c.char]
-      return stats && (stats.adjustedCount < stats.totalCount || stats.totalCount === 0)
+      // Unadjusted: Has samples (totalCount > 0) AND adjustedCount < totalCount
+      // This includes characters that are partially adjusted but not fully completed
+      return stats && stats.totalCount > 0 && stats.adjustedCount < stats.totalCount
     })
   } else if (activeTab.value === 'uncollected') {
     list = list.filter(c => !collectedMap.value[c.char])
@@ -146,9 +162,29 @@ const loadMore = () => {
 const goToDetail = (char: CharacterInfo) => {
   router.push(`/character/${char.char}`)
 }
+
+// Watch for tab change to reset currentRefineChar
+import { watch } from 'vue'
+watch(activeTab, () => {
+  currentRefineChar.value = ''
+  // If switching to unadjusted, set first char
+  if (activeTab.value === 'collected-unadjusted' && displayList.value.length > 0) {
+    currentRefineChar.value = displayList.value[0].char
+  }
+})
+
+// Watch displayList to set initial char if empty
+watch(displayList, (newList) => {
+  if (activeTab.value === 'collected-unadjusted' && !currentRefineChar.value && newList.length > 0) {
+    currentRefineChar.value = newList[0].char
+  }
+})
 </script>
 
 <style scoped>
+.refine-container {
+  padding-top: 16px;
+}
 .stats-card {
   display: flex;
   justify-content: space-around;
