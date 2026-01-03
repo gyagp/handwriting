@@ -19,13 +19,21 @@
     <div v-else-if="step === 2" class="processing-step">
       <div class="toolbar">
         <van-button size="small" @click="step = 1">返回</van-button>
-        <span>检测到 {{ extractedChars.length }} 个字符</span>
-        <van-button type="primary" size="small" @click="saveSelected" :disabled="selectedIds.size === 0">
-          保存选中 ({{ selectedIds.size }})
-        </van-button>
+        <span v-if="!isManualMode">检测到 {{ extractedChars.length }} 个字符</span>
+        <span v-else>手工框选模式</span>
+
+        <div v-if="!isManualMode" style="display: flex; gap: 8px;">
+             <van-button size="small" @click="enterManualMode">手工模式</van-button>
+             <van-button type="primary" size="small" @click="saveSelected" :disabled="selectedIds.size === 0">
+               保存选中 ({{ selectedIds.size }})
+             </van-button>
+        </div>
+        <div v-else>
+             <van-button type="primary" size="small" @click="exitManualMode">完成</van-button>
+        </div>
       </div>
 
-      <div class="extracted-grid">
+      <div v-if="!isManualMode" class="extracted-grid">
         <div
           v-for="item in extractedChars"
           :key="item.id"
@@ -38,6 +46,20 @@
             <van-icon name="success" v-if="selectedIds.has(item.id)" color="#fff" />
           </div>
         </div>
+      </div>
+
+      <div v-else class="manual-editor">
+         <div class="editor-container" style="position: relative; overflow: hidden; touch-action: none;">
+            <img :src="originalImageUrl" ref="editorImageRef" style="max-width: 100%; display: block;" @load="initCanvas" />
+            <canvas ref="overlayCanvasRef"
+                style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"
+                @mousedown="startDraw" @mousemove="drawing" @mouseup="endDraw"
+                @touchstart="startDraw" @touchmove="drawing" @touchend="endDraw"
+            ></canvas>
+         </div>
+         <div class="tips" style="padding: 10px; text-align: center; color: #666; font-size: 12px;">
+            在图片上拖动框选文字，点击红框可删除
+         </div>
       </div>
     </div>
 
@@ -90,11 +112,12 @@ import { ref, computed, shallowRef, toRaw } from 'vue'
 import { useRouter } from 'vue-router'
 import ImageCapture from '@/components/ImageCapture.vue'
 import GridDisplay from '@/components/GridDisplay.vue'
-import { processImage } from '@/services/opencv'
+import { processImage, processRegion } from '@/services/opencv'
 import { vectorizeImage } from '@/services/vectorize'
 import { saveSample, currentUser } from '@/services/db'
 import type { ExtractedCharacter, CharacterSample } from '@/types'
-import { showToast } from 'vant'
+import { showToast, showConfirmDialog } from 'vant'
+import { nextTick } from 'vue'
 
 const router = useRouter()
 const step = ref(1)
@@ -105,6 +128,10 @@ const extractedChars = shallowRef<ExtractedCharacter[]>([])
 const selectedIds = ref<Set<string>>(new Set())
 const batchText = ref('')
 const isPublic = ref(false)
+const originalImageUrl = ref('')
+const isManualMode = ref(false)
+const editorImageRef = ref<HTMLImageElement | null>(null)
+const overlayCanvasRef = ref<HTMLCanvasElement | null>(null)
 
 // 临时存储待保存的数据
 interface PendingSaveItem extends CharacterSample {
@@ -116,8 +143,10 @@ const handleCapture = async (file: File) => {
   processing.value = true
   processingText.value = '图像处理中...'
   try {
+    const url = URL.createObjectURL(file)
+    originalImageUrl.value = url
     const img = new Image()
-    img.src = URL.createObjectURL(file)
+    img.src = url
     await new Promise((resolve) => (img.onload = resolve))
 
     const results = await processImage(img)
@@ -158,6 +187,190 @@ const toggleSelect = (id: string) => {
     selectedIds.value.delete(id)
   } else {
     selectedIds.value.add(id)
+  }
+}
+
+// --- Manual Mode Logic ---
+const isDrawing = ref(false)
+const startPos = ref({ x: 0, y: 0 })
+const currentBox = ref<{ x: number, y: number, w: number, h: number } | null>(null)
+
+const enterManualMode = () => {
+  showConfirmDialog({
+    title: '手工模式',
+    message: '进入手工模式将清空当前识别结果，由您重新框选。确定吗？',
+  })
+    .then(() => {
+      extractedChars.value = []
+      selectedIds.value.clear()
+      isManualMode.value = true
+      nextTick(() => {
+        initCanvas()
+      })
+    })
+    .catch(() => {
+      // cancel
+    })
+}
+
+const exitManualMode = () => {
+  isManualMode.value = false
+}
+
+const initCanvas = () => {
+  const img = editorImageRef.value
+  const canvas = overlayCanvasRef.value
+  if (!img || !canvas) return
+
+  canvas.width = img.clientWidth
+  canvas.height = img.clientHeight
+  drawBoxes()
+}
+
+const getEventPos = (e: MouseEvent | TouchEvent) => {
+  const canvas = overlayCanvasRef.value
+  if (!canvas) return { x: 0, y: 0 }
+  const rect = canvas.getBoundingClientRect()
+  let clientX, clientY
+  if ('touches' in e) {
+    clientX = e.touches[0].clientX
+    clientY = e.touches[0].clientY
+  } else {
+    clientX = (e as MouseEvent).clientX
+    clientY = (e as MouseEvent).clientY
+  }
+  return {
+    x: clientX - rect.left,
+    y: clientY - rect.top
+  }
+}
+
+const startDraw = (e: MouseEvent | TouchEvent) => {
+  e.preventDefault()
+  const { x, y } = getEventPos(e)
+
+  // Check if clicked on existing box to delete
+  const img = editorImageRef.value
+  if (img) {
+      const scaleX = img.clientWidth / img.naturalWidth
+      const scaleY = img.clientHeight / img.naturalHeight
+
+      // Check in reverse order (topmost first)
+      for (let i = extractedChars.value.length - 1; i >= 0; i--) {
+          const char = extractedChars.value[i]
+          const bx = char.boundingBox.x * scaleX
+          const by = char.boundingBox.y * scaleY
+          const bw = char.boundingBox.width * scaleX
+          const bh = char.boundingBox.height * scaleY
+
+          if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) {
+              // Delete this box
+              showConfirmDialog({
+                  title: '删除',
+                  message: '确定要删除这个选区吗？'
+              }).then(() => {
+                  const newChars = [...extractedChars.value]
+                  newChars.splice(i, 1)
+                  extractedChars.value = newChars
+                  selectedIds.value.delete(char.id)
+                  drawBoxes()
+              }).catch(() => {})
+              return
+          }
+      }
+  }
+
+  isDrawing.value = true
+  startPos.value = { x, y }
+  currentBox.value = { x, y, w: 0, h: 0 }
+}
+
+const drawing = (e: MouseEvent | TouchEvent) => {
+  if (!isDrawing.value) return
+  e.preventDefault()
+  const { x, y } = getEventPos(e)
+
+  const w = x - startPos.value.x
+  const h = y - startPos.value.y
+
+  currentBox.value = {
+    x: w > 0 ? startPos.value.x : x,
+    y: h > 0 ? startPos.value.y : y,
+    w: Math.abs(w),
+    h: Math.abs(h)
+  }
+  drawBoxes()
+}
+
+const endDraw = async (e: MouseEvent | TouchEvent) => {
+  if (!isDrawing.value) return
+  isDrawing.value = false
+
+  if (!currentBox.value || currentBox.value.w < 5 || currentBox.value.h < 5) {
+      currentBox.value = null
+      drawBoxes()
+      return
+  }
+
+  // Convert to image coordinates
+  const img = editorImageRef.value
+  if (!img) return
+
+  const scaleX = img.naturalWidth / img.clientWidth
+  const scaleY = img.naturalHeight / img.clientHeight
+
+  const realX = Math.floor(currentBox.value.x * scaleX)
+  const realY = Math.floor(currentBox.value.y * scaleY)
+  const realW = Math.floor(currentBox.value.w * scaleX)
+  const realH = Math.floor(currentBox.value.h * scaleY)
+
+  currentBox.value = null
+
+  // Process region
+  processing.value = true
+  try {
+      const imageData = await processRegion(img, realX, realY, realW, realH)
+
+      const newChar: ExtractedCharacter = {
+          id: `manual_${Date.now()}`,
+          imageData: imageData,
+          boundingBox: { x: realX, y: realY, width: realW, height: realH }
+      }
+
+      extractedChars.value = [...extractedChars.value, newChar]
+      selectedIds.value.add(newChar.id) // Auto select
+      drawBoxes()
+  } catch (e: any) {
+      showToast('处理选区失败: ' + e.message)
+  } finally {
+      processing.value = false
+  }
+}
+
+const drawBoxes = () => {
+  const canvas = overlayCanvasRef.value
+  const img = editorImageRef.value
+  if (!canvas || !img) return
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+  const scaleX = img.clientWidth / img.naturalWidth
+  const scaleY = img.clientHeight / img.naturalHeight
+
+  extractedChars.value.forEach(char => {
+    const { x, y, width, height } = char.boundingBox
+    ctx.strokeStyle = 'red'
+    ctx.lineWidth = 2
+    ctx.strokeRect(x * scaleX, y * scaleY, width * scaleX, height * scaleY)
+  })
+
+  if (isDrawing.value && currentBox.value) {
+     ctx.strokeStyle = 'blue'
+     ctx.lineWidth = 2
+     const { x, y, w, h } = currentBox.value
+     ctx.strokeRect(x, y, w, h)
   }
 }
 

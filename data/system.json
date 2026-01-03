@@ -26,6 +26,22 @@
         "0107dd3e-6f33-4ff4-b28e-5bc91cfd336d"
       ],
       "collectionVisibility": "public"
+    },
+    {
+      "id": "088b702e-e854-41c6-9684-a4116b368276",
+      "username": "tester01",
+      "password": "password123",
+      "role": "user",
+      "createdAt": 1767320535952,
+      "collectionVisibility": "public"
+    },
+    {
+      "id": "6a69b9ab-eff9-4a1c-b71c-bad52364b037",
+      "username": "tester02",
+      "password": "password123",
+      "role": "user",
+      "createdAt": 1767320535960,
+      "collectionVisibility": "public"
     }
   ],
   "ratings": [

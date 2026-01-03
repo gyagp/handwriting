@@ -44,6 +44,39 @@ export interface ProcessedContour {
   image: ImageData
 }
 
+// Helper to safely create Mat from image source
+function createMatFromImage(cv: any, imageSource: HTMLImageElement | HTMLCanvasElement): any {
+  let canvas: HTMLCanvasElement
+  let ctx: CanvasRenderingContext2D | null
+
+  if (imageSource instanceof HTMLImageElement) {
+    canvas = document.createElement('canvas')
+    canvas.width = imageSource.naturalWidth || imageSource.width
+    canvas.height = imageSource.naturalHeight || imageSource.height
+    ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Failed to create canvas context')
+    ctx.drawImage(imageSource, 0, 0)
+  } else {
+    canvas = imageSource
+    ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Failed to get canvas context')
+  }
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+
+  // Use cv.imread which handles the conversion internally and might be more robust
+  // Note: cv.imread can accept a canvas element directly
+  try {
+    return cv.imread(canvas)
+  } catch (e) {
+    console.error('cv.imread failed, trying fallback:', e)
+    // Fallback: try to create Mat manually if imread fails
+    const mat = new cv.Mat(canvas.height, canvas.width, cv.CV_8UC4)
+    mat.data.set(imageData.data)
+    return mat
+  }
+}
+
 // 图像预处理和字符分割
 export async function processImage(
   imageSource: HTMLImageElement | HTMLCanvasElement
@@ -51,7 +84,7 @@ export async function processImage(
   await loadOpenCV()
   const cv = (window as any).cv
 
-  const src = cv.imread(imageSource)
+  const src = createMatFromImage(cv, imageSource)
   const gray = new cv.Mat()
   const binary = new cv.Mat()
   const contours = new cv.MatVector()
@@ -162,5 +195,66 @@ export async function processImage(
     hierarchy.delete()
     if (morph) morph.delete()
     if (kernel) kernel.delete()
+  }
+}
+
+export async function processRegion(
+  imageSource: HTMLImageElement | HTMLCanvasElement,
+  x: number, y: number, width: number, height: number
+): Promise<ImageData> {
+  await loadOpenCV()
+  const cv = (window as any).cv
+
+  const src = createMatFromImage(cv, imageSource)
+
+  // Ensure ROI is within bounds
+  const safeX = Math.max(0, Math.min(x, src.cols - 1))
+  const safeY = Math.max(0, Math.min(y, src.rows - 1))
+  const safeW = Math.max(1, Math.min(width, src.cols - safeX))
+  const safeH = Math.max(1, Math.min(height, src.rows - safeY))
+
+  const roiRect = new cv.Rect(safeX, safeY, safeW, safeH)
+  const roi = src.roi(roiRect)
+
+  const gray = new cv.Mat()
+  const binary = new cv.Mat()
+
+  try {
+      cv.cvtColor(roi, gray, cv.COLOR_RGBA2GRAY, 0)
+
+      // Use adaptive thresholding for better local detail preservation in manual mode
+      // This helps when lighting is uneven or contrast is low in the specific region
+      // Block size increased to 51 to avoid "hollow" strokes (where center of thick stroke is treated as background)
+      // C value adjusted to 15 to be robust
+      cv.adaptiveThreshold(gray, binary, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 51, 15)
+
+      // Fill small holes and smooth edges
+      const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3))
+      cv.morphologyEx(binary, binary, cv.MORPH_CLOSE, kernel)
+      kernel.delete()
+
+      // Convert to RGBA for display/vectorization
+      const rgbaData = new Uint8ClampedArray(safeW * safeH * 4)
+      for (let j = 0; j < safeW * safeH; j++) {
+          const val = binary.data[j]
+          if (val > 128) { // Text
+              rgbaData[j * 4 + 0] = 0
+              rgbaData[j * 4 + 1] = 0
+              rgbaData[j * 4 + 2] = 0
+              rgbaData[j * 4 + 3] = 255
+          } else { // BG
+              rgbaData[j * 4 + 0] = 255
+              rgbaData[j * 4 + 1] = 255
+              rgbaData[j * 4 + 2] = 255
+              rgbaData[j * 4 + 3] = 0
+          }
+      }
+
+      return new ImageData(rgbaData, safeW, safeH)
+  } finally {
+      src.delete()
+      roi.delete()
+      gray.delete()
+      binary.delete()
   }
 }
