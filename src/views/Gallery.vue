@@ -9,10 +9,10 @@
       <div style="background: var(--bg-color)">
         <van-search v-model="searchText" placeholder="搜索作品标题或作者" background="transparent" />
         <div class="filter-bar" v-if="!isAdmin" style="padding: 0 16px 10px;">
-          <van-checkbox-group v-model="filterTypes" direction="horizontal">
-            <van-checkbox name="refined" shape="square" style="margin-right: 20px">已精修</van-checkbox>
-            <van-checkbox name="unrefined" shape="square">未精修</van-checkbox>
-          </van-checkbox-group>
+          <van-radio-group v-model="filterType" direction="horizontal">
+            <van-radio name="refined" style="margin-right: 20px">已精修</van-radio>
+            <van-radio name="unrefined">未精修</van-radio>
+          </van-radio-group>
         </div>
       </div>
     </van-sticky>
@@ -246,7 +246,7 @@ const samplesMap = ref<Record<string, CharacterSample>>({})
 const workStats = ref<Record<string, number>>({})
 const activeTab = ref(0)
 const searchText = ref('')
-const filterTypes = ref(['refined', 'unrefined'])
+const filterType = ref('refined')
 
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
 
@@ -268,8 +268,8 @@ const myWorks = computed(() => works.value.filter(w => {
   if (w.visibility === 'public') {
     // Show if not published (Pending/Rejected)
     if (w.status !== 'published') return filterWork(w)
-    // Show if published AND refined (Legacy support for old public works)
-    if (w.isRefined) return filterWork(w)
+    // ALWAYS show my public works, even if published
+    return filterWork(w)
   }
 
   return false
@@ -309,11 +309,10 @@ const myUnrefinedWorks = computed(() => {
 
 const filteredWorks = computed(() => {
   let result: Work[] = []
-  if (filterTypes.value.includes('refined')) {
-    result.push(...myRefinedWorks.value)
-  }
-  if (filterTypes.value.includes('unrefined')) {
-    result.push(...myUnrefinedWorks.value)
+  if (filterType.value === 'refined') {
+    result = [...myRefinedWorks.value]
+  } else {
+    result = [...myUnrefinedWorks.value]
   }
   // Sort by updated time desc
   return result.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
@@ -378,6 +377,11 @@ const loadData = async () => {
   samplesMap.value = s
   workStats.value = await getWorkStats(w)
 
+  // Auto-switch to unrefined if refined is empty
+  if (myRefinedWorks.value.length === 0 && myUnrefinedWorks.value.length > 0) {
+    filterType.value = 'unrefined'
+  }
+
   // Check for rejected works
   if (!isAdmin.value) {
     const rejectedCount = myWorks.value.filter(w => w.status === 'rejected').length
@@ -409,7 +413,7 @@ const getPreviewChars = (work: Work) => {
 
 const getCharContent = (work: Work, index: number, char: string) => {
   // 1. 优先使用作品中指定的样式
-  const sampleId = work.charStyles[index]
+  const sampleId = work.charStyles?.[index]
   if (sampleId) {
     // 这里我们没有加载所有sample的详情，只加载了最新的map
     // 如果作品里选的不是最新的，这里可能显示不出来，或者显示最新的

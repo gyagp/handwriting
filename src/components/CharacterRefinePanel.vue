@@ -70,7 +70,10 @@
             <van-stepper v-model="editForm.offsetY" :min="-200" :max="200" :step="0.1" button-size="22px" input-width="40px" />
           </div>
           <div class="control-item" style="justify-content: flex-end; gap: 12px;">
-             <van-checkbox v-model="editForm.isAdjusted">已精修</van-checkbox>
+             <van-radio-group v-model="editForm.isAdjusted" direction="horizontal">
+               <van-radio :name="false">未精修</van-radio>
+               <van-radio :name="true">已精修</van-radio>
+             </van-radio-group>
              <van-button type="primary" size="small" @click="saveAdjustment">保存</van-button>
           </div>
         </div>

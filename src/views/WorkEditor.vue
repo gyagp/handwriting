@@ -395,7 +395,7 @@ const selfWrittenCount = computed(() => {
     if (!samples) return false
 
     // If a specific style is selected
-    const selectedId = work.value.charStyles[item.index]
+    const selectedId = work.value.charStyles?.[item.index]
     if (selectedId) {
         const s = samples.find(sample => sample.id === selectedId)
         return s && s.userId === work.value.userId
@@ -476,7 +476,10 @@ onMounted(async () => {
   if (isEdit.value) {
     const w = await getWork(route.params.id as string)
     if (w) {
+      if (!w.charStyles) w.charStyles = {}
+      if (!w.charAdjustments) w.charAdjustments = {}
       work.value = w
+
       // If it's not my work, start as unrefined (it's a new draft for me)
       if (w.userId !== currentUser.value?.id) {
           isRefined.value = false
@@ -651,7 +654,7 @@ const onRateWork = async (rWork: Work, value: number) => {
 const getMyWorkPreviewContent = (work: Work, index: number, char: string) => {
   // If it's my own work, respect my choices
   if (work.userId === currentUser.value?.id) {
-      const sampleId = work.charStyles[index]
+      const sampleId = work.charStyles?.[index]
       if (sampleId && relatedSamplesCache.value[work.id]) {
         const sample = relatedSamplesCache.value[work.id].find(s => s.id === sampleId)
         if (sample) return sample.svgPath
@@ -682,7 +685,7 @@ const getMyWorkPreviewViewBox = (work: Work, index: number) => {
 
       // Or sample viewBox
       const char = work.content[index] // Simple access, assuming index matches
-      const sampleId = work.charStyles[index]
+      const sampleId = work.charStyles?.[index]
       if (sampleId && relatedSamplesCache.value[work.id]) {
         const sample = relatedSamplesCache.value[work.id].find(s => s.id === sampleId)
         return sample?.svgViewBox
@@ -699,7 +702,7 @@ const getMyWorkPreviewViewBox = (work: Work, index: number) => {
 }
 
 const getRelatedCharContent = (rWork: Work, index: number, char: string) => {
-  const sampleId = rWork.charStyles[index]
+  const sampleId = rWork.charStyles?.[index]
   if (sampleId && relatedSamplesCache.value[rWork.id]) {
     const sample = relatedSamplesCache.value[rWork.id].find(s => s.id === sampleId)
     if (sample) return sample.svgPath
@@ -719,7 +722,7 @@ const getRelatedCharViewBox = (rWork: Work, index: number) => {
     return `${minX} ${minY} ${width} ${height}`
   }
 
-  const sampleId = rWork.charStyles[index]
+  const sampleId = rWork.charStyles?.[index]
   if (sampleId && relatedSamplesCache.value[rWork.id]) {
     const sample = relatedSamplesCache.value[rWork.id].find(s => s.id === sampleId)
     if (sample) return sample.svgViewBox

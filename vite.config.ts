@@ -15,8 +15,7 @@ export default defineConfig({
           const rootDataDir = resolve(__dirname, 'data')
           const usersDir = resolve(rootDataDir, 'users')
           const systemFile = resolve(rootDataDir, 'system.json')
-          const publicWorksFile = resolve(rootDataDir, 'public_works.json')
-          const oldDataPath = resolve(__dirname, 'data.json')
+          const publicWorksFile = resolve(rootDataDir, 'works.json')
 
           // Ensure directories exist
           if (!fs.existsSync(rootDataDir)) fs.mkdirSync(rootDataDir, { recursive: true })
@@ -40,11 +39,12 @@ export default defineConfig({
                 responseData.settings = systemData.settings || null
 
                 // Load public works
+                const worksMap = new Map()
                 if (fs.existsSync(publicWorksFile)) {
                   try {
                     const publicWorks = JSON.parse(fs.readFileSync(publicWorksFile, 'utf-8'))
                     if (Array.isArray(publicWorks)) {
-                      responseData.works.push(...publicWorks)
+                      publicWorks.forEach(w => worksMap.set(w.id, w))
                     }
                   } catch (e) {}
                 }
@@ -70,27 +70,20 @@ export default defineConfig({
                         try {
                           const works = JSON.parse(fs.readFileSync(worksFile, 'utf-8'))
                           if (Array.isArray(works)) {
-                            works.forEach(w => w.userId = userId)
-                            responseData.works.push(...works)
+                            works.forEach(w => {
+                              w.userId = userId
+                              worksMap.set(w.id, w) // Overwrite public work if exists
+                            })
                           }
                         } catch (e) {}
                       }
                     }
                   }
                 }
+                responseData.works = Array.from(worksMap.values())
               } catch (e) {
                 console.error('Error loading data:', e)
               }
-            } else if (fs.existsSync(oldDataPath)) {
-              // Migration: Load from old data.json
-              try {
-                const data = JSON.parse(fs.readFileSync(oldDataPath, 'utf-8'))
-                responseData.users = data.users || []
-                responseData.samples = data.samples || []
-                responseData.works = data.works || []
-                responseData.ratings = data.ratings || []
-                responseData.settings = data.settings || null
-              } catch (e) {}
             }
 
             res.setHeader('Content-Type', 'application/json')
@@ -129,17 +122,57 @@ export default defineConfig({
 
                 if (Array.isArray(data.works)) {
                   for (const work of data.works) {
-                    if (work.visibility === 'public') {
-                      publicWorks.push(work)
-                    } else if (work.userId) {
+                    // 1. Save full work to user directory if it has userId
+                    if (work.userId) {
                       if (!worksByUser[work.userId]) worksByUser[work.userId] = []
                       worksByUser[work.userId].push(work)
+                    }
+
+                    // 2. If public, ALSO save a sanitized copy to public_works.json
+                    if (work.visibility === 'public') {
+                      const cleanWork = { ...work }
+                      // Strip user-specific and handwriting specific data
+                      delete cleanWork.charStyles
+                      delete cleanWork.charAdjustments
+                      delete cleanWork.isRefined
+                      delete cleanWork.layout      // User-specific preference
+                      delete cleanWork.gridType    // User-specific preference
+                      delete cleanWork.visibility  // Always public in this file
+                      // Keep: id, title, content, author, userId, status, createdAt, updatedAt, score, authorDeleted
+                      publicWorks.push(cleanWork)
                     }
                   }
                 }
 
-                // Save public works
-                fs.writeFileSync(publicWorksFile, JSON.stringify(publicWorks, null, 2))
+                // Only save public works if content actually changed
+                // Compare with existing file to avoid unnecessary writes
+                let existingPublicWorks = []
+                if (fs.existsSync(publicWorksFile)) {
+                  try {
+                    existingPublicWorks = JSON.parse(fs.readFileSync(publicWorksFile, 'utf-8'))
+                  } catch (e) {}
+                }
+
+                // Compare by id, title, content, author, status (ignoring updatedAt for user changes)
+                const publicWorksChanged = () => {
+                  if (existingPublicWorks.length !== publicWorks.length) return true
+                  const existingMap = new Map(existingPublicWorks.map(w => [w.id, w]))
+                  for (const work of publicWorks) {
+                    const existing = existingMap.get(work.id)
+                    if (!existing) return true
+                    if (existing.title !== work.title ||
+                        existing.content !== work.content ||
+                        existing.author !== work.author ||
+                        existing.status !== work.status) {
+                      return true
+                    }
+                  }
+                  return false
+                }
+
+                if (publicWorksChanged()) {
+                  fs.writeFileSync(publicWorksFile, JSON.stringify(publicWorks, null, 2))
+                }
 
                 // Save user data
                 if (Array.isArray(data.users)) {
