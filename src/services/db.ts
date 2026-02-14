@@ -19,6 +19,11 @@ let store: LocalData = {
   settings: null
 }
 
+// Cache control for loadFromFile
+let _lastLoadTime = 0
+let _loadPromise: Promise<void> | null = null
+const LOAD_CACHE_TTL = 30_000 // 30 seconds — reuse in-memory data within this window
+
 // Cache for allowed characters
 let allowedChars: Set<string> | null = null
 
@@ -127,9 +132,24 @@ export async function syncToFile() {
 // Data loading
 // =============================================
 
-export async function loadFromFile() {
+export async function loadFromFile(force = false) {
+  // Return cached data if still fresh
+  if (!force && _lastLoadTime > 0 && Date.now() - _lastLoadTime < LOAD_CACHE_TTL) {
+    return
+  }
+  // Dedup concurrent calls — reuse in-flight promise
+  if (_loadPromise) return _loadPromise
+  _loadPromise = _doLoadFromFile()
   try {
-    const res = await fetch('/api/data?t=' + Date.now())
+    await _loadPromise
+  } finally {
+    _loadPromise = null
+  }
+}
+
+async function _doLoadFromFile() {
+  try {
+    const res = await fetch('/api/data')
     if (!res.ok) return
 
     const data = await res.json()
@@ -150,6 +170,8 @@ export async function loadFromFile() {
     store.works.forEach(w => {
       if (w.score && w.score > 10) w.score = w.score / 10
     })
+
+    _lastLoadTime = Date.now()
   } catch (e) {
     console.error('Load from file failed:', e)
   }
