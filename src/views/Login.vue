@@ -65,6 +65,9 @@ const handleGuestLogin = async () => {
   }
 }
 
+// Registration disabled but kept for future reactivation
+// @ts-ignore: intentionally unused
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const handleRegister = async () => {
   if (!username.value || !password.value) {
     showToast('请输入用户名和密码')
