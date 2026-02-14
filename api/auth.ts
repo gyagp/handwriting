@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import crypto from 'crypto'
 import { readBlobJson, writeBlobJson, blobPath } from './_lib/blob'
 import { hashPassword, verifyPassword, sanitizeUser } from './_lib/password'
 

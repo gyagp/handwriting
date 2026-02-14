@@ -166,8 +166,12 @@ export async function registerUser(username: string, password?: string): Promise
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'register', username, password })
   })
+  if (!res.ok) {
+    let errorMsg = '注册失败'
+    try { const data = await res.json(); errorMsg = data.error || errorMsg } catch {}
+    throw new Error(errorMsg)
+  }
   const data = await res.json()
-  if (!res.ok) throw new Error(data.error || '注册失败')
 
   const user = data.user as User
   store.users.push(user)
@@ -181,8 +185,12 @@ export async function loginUser(username: string, password?: string): Promise<Us
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action: 'login', username, password })
   })
+  if (!res.ok) {
+    let errorMsg = '登录失败'
+    try { const data = await res.json(); errorMsg = data.error || errorMsg } catch {}
+    throw new Error(errorMsg)
+  }
   const data = await res.json()
-  if (!res.ok) throw new Error(data.error || '登录失败')
 
   const user = data.user as User
   // Update local store with server-returned user (no password fields)
