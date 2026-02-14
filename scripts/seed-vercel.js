@@ -29,11 +29,14 @@ function hashPassword(password, salt) {
   return { hash, salt: s }
 }
 
+const token = process.env.BLOB_READ_WRITE_TOKEN
+
 async function uploadJson(blobPath, data) {
   const blob = await put(blobPath, JSON.stringify(data, null, 2), {
     access: 'public',
     addRandomSuffix: false,
     contentType: 'application/json',
+    token,
   })
   console.log(`  Uploaded ${blobPath} → ${blob.url}`)
 }
@@ -49,6 +52,7 @@ async function uploadFile(localPath, blobPath) {
     access: 'public',
     addRandomSuffix: false,
     contentType: 'application/json',
+    token,
   })
   console.log(`  Uploaded ${blobPath} → ${blob.url}`)
 }
