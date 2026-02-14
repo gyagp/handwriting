@@ -43,7 +43,13 @@ function optimisticSync(
   rollbackFn: () => void,
   errorMsg = '同步失败，已回滚'
 ) {
-  syncFn().catch((e) => {
+  // Bump cache timer so loadFromFile() won't overwrite local changes
+  // before the sync completes
+  _lastLoadTime = Date.now()
+  syncFn().then(() => {
+    // After successful sync, bump again so reads stay fresh
+    _lastLoadTime = Date.now()
+  }).catch((e) => {
     console.error('Optimistic sync failed, rolling back:', e)
     rollbackFn()
     showNotify({ type: 'danger', message: errorMsg })
@@ -659,8 +665,6 @@ export async function setAllVisibility(visibility: 'public' | 'private') {
 }
 
 export async function getSamplesByChar(char: string): Promise<CharacterSample[]> {
-  await loadFromFile()
-
   const currentUserId = currentUser.value?.id
 
   return store.samples
@@ -680,7 +684,6 @@ export async function getSamplesByChar(char: string): Promise<CharacterSample[]>
 }
 
 export async function getCollectedChars(): Promise<string[]> {
-  await loadFromFile()
   const currentUserId = currentUser.value?.id
   const chars = new Set<string>()
 
@@ -699,7 +702,6 @@ export async function getCollectedChars(): Promise<string[]> {
 }
 
 export async function getCollectedSamplesMap(): Promise<Record<string, CharacterSample>> {
-  await loadFromFile()
   const map: Record<string, CharacterSample> = {}
   const currentUserId = currentUser.value?.id
 
@@ -720,7 +722,6 @@ export async function getCollectedSamplesMap(): Promise<Record<string, Character
 }
 
 export async function getSamplesForWork(work: Work): Promise<CharacterSample[]> {
-  await loadFromFile()
   const sampleIds = new Set(Object.values(work.charStyles))
   const extraChars = new Set((work.title + (work.author || '')).split('').filter(c => c.trim()))
 
@@ -732,7 +733,6 @@ export async function getSamplesForWork(work: Work): Promise<CharacterSample[]> 
 }
 
 export async function getWorkStats(works: Work[]): Promise<Record<string, number>> {
-  await loadFromFile()
   const stats: Record<string, number> = {}
 
   const userCharSet = new Set<string>()
@@ -919,7 +919,6 @@ export async function getWorks(): Promise<Work[]> {
 }
 
 export async function getRelatedPublicWorks(title: string, excludeId?: string): Promise<Work[]> {
-  await loadFromFile()
   const currentUserId = currentUser.value?.id
 
   return store.works.filter(w => {
