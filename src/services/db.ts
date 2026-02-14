@@ -24,6 +24,32 @@ let _lastLoadTime = 0
 let _loadPromise: Promise<void> | null = null
 const LOAD_CACHE_TTL = 30_000 // 30 seconds — reuse in-memory data within this window
 
+// =============================================
+// Optimistic sync: fire-and-forget with rollback
+// =============================================
+import { showNotify } from 'vant'
+
+/** Snapshot a piece of store state for rollback */
+function snapshot<T>(data: T): T {
+  return JSON.parse(JSON.stringify(data))
+}
+
+/**
+ * Fire a sync operation in the background.
+ * If it fails, restore the snapshot and notify the user.
+ */
+function optimisticSync(
+  syncFn: () => Promise<void>,
+  rollbackFn: () => void,
+  errorMsg = '同步失败，已回滚'
+) {
+  syncFn().catch((e) => {
+    console.error('Optimistic sync failed, rolling back:', e)
+    rollbackFn()
+    showNotify({ type: 'danger', message: errorMsg })
+  })
+}
+
 // Cache for allowed characters
 let allowedChars: Set<string> | null = null
 
@@ -51,15 +77,12 @@ async function syncSamples() {
   if (!currentUser.value || currentUser.value.role === 'guest') return
   const userId = currentUser.value.id
   const mySamples = store.samples.filter(s => s.userId === userId)
-  try {
-    await fetch(`/api/users/${userId}/samples`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(mySamples)
-    })
-  } catch (e) {
-    console.error('Sync samples failed:', e)
-  }
+  const res = await fetch(`/api/users/${userId}/samples`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(mySamples)
+  })
+  if (!res.ok) throw new Error('Sync samples failed')
 }
 
 /** Save current user's works to server */
@@ -67,60 +90,48 @@ async function syncWorks() {
   if (!currentUser.value || currentUser.value.role === 'guest') return
   const userId = currentUser.value.id
   const myWorks = store.works.filter(w => w.userId === userId)
-  try {
-    await fetch(`/api/users/${userId}/works`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(myWorks)
-    })
-  } catch (e) {
-    console.error('Sync works failed:', e)
-  }
+  const res = await fetch(`/api/users/${userId}/works`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(myWorks)
+  })
+  if (!res.ok) throw new Error('Sync works failed')
 }
 
 /** Save a rating to server */
 async function syncRating(userId: string, targetId: string, targetType: string, score: number, targetUserId?: string) {
-  try {
-    await fetch('/api/system', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'saveRating',
-        payload: { userId, targetId, targetType, score, targetUserId }
-      })
+  const res = await fetch('/api/system', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'saveRating',
+      payload: { userId, targetId, targetType, score, targetUserId }
     })
-  } catch (e) {
-    console.error('Sync rating failed:', e)
-  }
+  })
+  if (!res.ok) throw new Error('Sync rating failed')
 }
 
 /** Save settings to server */
 async function syncSettingsToServer(settings: Partial<AppSettings>) {
-  try {
-    await fetch('/api/system', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'saveSettings', payload: settings })
-    })
-  } catch (e) {
-    console.error('Sync settings failed:', e)
-  }
+  const res = await fetch('/api/system', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'saveSettings', payload: settings })
+  })
+  if (!res.ok) throw new Error('Sync settings failed')
 }
 
 /** Update user fields on server */
 async function syncUserUpdate(userId: string, updates: Record<string, any>) {
-  try {
-    await fetch('/api/system', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'updateUser',
-        payload: { userId, updates }
-      })
+  const res = await fetch('/api/system', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'updateUser',
+      payload: { userId, updates }
     })
-  } catch (e) {
-    console.error('Sync user update failed:', e)
-  }
+  })
+  if (!res.ok) throw new Error('Sync user update failed')
 }
 
 // Legacy syncToFile — kept as no-op for backward compat
@@ -530,8 +541,13 @@ export async function saveRating(targetId: string, targetType: 'sample' | 'work'
   // Update average score locally
   updateAverageScore(targetId, targetType)
 
-  // Send to server (granular)
-  await syncRating(currentUser.value.id, targetId, targetType, score, targetUserId)
+  // Fire-and-forget sync with rollback
+  const prevRatings = snapshot(store.ratings)
+  optimisticSync(
+    () => syncRating(currentUser.value!.id, targetId, targetType, score, targetUserId),
+    () => { store.ratings = prevRatings },
+    '评分同步失败，已回滚'
+  )
 }
 
 function updateAverageScore(targetId: string, targetType: 'sample' | 'work') {
@@ -569,8 +585,13 @@ export async function getSettings(): Promise<AppSettings> {
 }
 
 export async function saveSettings(settings: Partial<AppSettings>) {
+  const prevSettings = snapshot(store.settings)
   store.settings = { ...store.settings, ...settings } as AppSettings
-  await syncSettingsToServer(settings)
+  optimisticSync(
+    () => syncSettingsToServer(settings),
+    () => { store.settings = prevSettings },
+    '设置同步失败，已回滚'
+  )
 }
 
 // =============================================
@@ -609,7 +630,13 @@ export async function saveSample(sample: CharacterSample) {
       store.samples.push(sample)
     }
   }
-  await syncSamples()
+  // Fire-and-forget sync with rollback
+  const prevSamples = snapshot(store.samples)
+  optimisticSync(
+    () => syncSamples(),
+    () => { store.samples = prevSamples },
+    '书写同步失败，已回滚'
+  )
 }
 
 export async function setAllVisibility(visibility: 'public' | 'private') {
@@ -617,9 +644,17 @@ export async function setAllVisibility(visibility: 'public' | 'private') {
 
   const userIndex = store.users.findIndex(u => u.id === currentUser.value!.id)
   if (userIndex >= 0) {
+    const prevVisibility = store.users[userIndex].collectionVisibility
     store.users[userIndex].collectionVisibility = visibility
     currentUser.value.collectionVisibility = visibility
-    await syncUserUpdate(currentUser.value.id, { collectionVisibility: visibility })
+    optimisticSync(
+      () => syncUserUpdate(currentUser.value!.id, { collectionVisibility: visibility }),
+      () => {
+        store.users[userIndex].collectionVisibility = prevVisibility
+        if (currentUser.value) currentUser.value.collectionVisibility = prevVisibility
+      },
+      '可见性同步失败，已回滚'
+    )
   }
 }
 
@@ -837,7 +872,13 @@ export async function saveWork(work: Work) {
     if (!work.createdAt) work.createdAt = Date.now()
     store.works.push(work)
   }
-  await syncWorks()
+  // Fire-and-forget sync with rollback
+  const prevWorks = snapshot(store.works)
+  optimisticSync(
+    () => syncWorks(),
+    () => { store.works = prevWorks },
+    '作品同步失败，已回滚'
+  )
 }
 
 export async function approveWork(workId: string, approved: boolean) {
@@ -846,9 +887,15 @@ export async function approveWork(workId: string, approved: boolean) {
   const work = store.works.find(w => w.id === workId)
   if (!work) throw new Error('Work not found')
 
+  const prevStatus = work.status
+  const prevUpdatedAt = work.updatedAt
   work.status = approved ? 'published' : 'rejected'
   work.updatedAt = Date.now()
-  await syncWorks()
+  optimisticSync(
+    () => syncWorks(),
+    () => { work.status = prevStatus; work.updatedAt = prevUpdatedAt },
+    '审核同步失败，已回滚'
+  )
 }
 
 export async function getWorks(): Promise<Work[]> {
@@ -914,7 +961,13 @@ export async function deleteWork(id: string) {
     store.works = store.works.filter(w => w.id !== id)
   }
 
-  await syncWorks()
+  // Fire-and-forget sync with rollback
+  const prevWorks = snapshot(store.works.concat([work]))
+  optimisticSync(
+    () => syncWorks(),
+    () => { store.works = prevWorks },
+    '删除同步失败，已回滚'
+  )
 }
 
 // =============================================
@@ -936,7 +989,13 @@ export async function deleteSample(id: string) {
   }
 
   store.samples = store.samples.filter(s => s.id !== id)
-  await syncSamples()
+  // Fire-and-forget sync with rollback
+  const prevSamples = snapshot(store.samples.concat([sample]))
+  optimisticSync(
+    () => syncSamples(),
+    () => { store.samples = prevSamples },
+    '删除同步失败，已回滚'
+  )
 }
 
 // =============================================
@@ -974,8 +1033,20 @@ export async function collectWork(workId: string) {
     currentUser.value.collectedWorkIds.push(workId)
   }
 
-  await syncWorks()
-  await syncUserUpdate(currentUser.value.id, { collectedWorkIds: currentUser.value.collectedWorkIds })
+  // Fire-and-forget sync with rollback
+  const prevWorks = snapshot(store.works)
+  const prevCollected = snapshot(currentUser.value.collectedWorkIds)
+  optimisticSync(
+    async () => {
+      await syncWorks()
+      await syncUserUpdate(currentUser.value!.id, { collectedWorkIds: currentUser.value!.collectedWorkIds })
+    },
+    () => {
+      store.works = prevWorks
+      if (currentUser.value) currentUser.value.collectedWorkIds = prevCollected
+    },
+    '收集同步失败，已回滚'
+  )
 }
 
 export async function uncollectWork(workId: string) {
@@ -987,11 +1058,24 @@ export async function uncollectWork(workId: string) {
 // =============================================
 
 export async function clearAllData() {
+  const prevSamples = snapshot(store.samples)
+  const prevWorks = snapshot(store.works)
+  const prevSettings = snapshot(store.settings)
   store.samples = []
   store.works = []
   store.settings = null
 
-  await syncSamples()
-  await syncWorks()
+  optimisticSync(
+    async () => {
+      await syncSamples()
+      await syncWorks()
+    },
+    () => {
+      store.samples = prevSamples
+      store.works = prevWorks
+      store.settings = prevSettings
+    },
+    '清空同步失败，已回滚'
+  )
   await initSettings()
 }
