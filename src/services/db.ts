@@ -200,6 +200,7 @@ export async function loginUser(username: string, password?: string): Promise<Us
 
   currentUser.value = user
   localStorage.setItem('last_user', user.username)
+  localStorage.setItem('current_user', JSON.stringify(user))
   return user
 }
 
@@ -212,12 +213,14 @@ export async function loginAsGuest(): Promise<User> {
     collectionVisibility: 'private'
   }
   currentUser.value = guestUser
+  localStorage.setItem('current_user', JSON.stringify(guestUser))
   return guestUser
 }
 
 export function logoutUser() {
   currentUser.value = null
   localStorage.removeItem('last_user')
+  localStorage.removeItem('current_user')
 }
 
 export function getCurrentUser() {
@@ -312,11 +315,31 @@ export async function initSettings() {
     }
   }
 
-  // Auto login last user
-  const lastUser = localStorage.getItem('last_user')
-  if (lastUser) {
-    const user = store.users.find(u => u.username === lastUser)
-    if (user) currentUser.value = user
+  // Auto login: restore from stored user object, then refresh from server data
+  const storedUser = localStorage.getItem('current_user')
+  if (storedUser) {
+    try {
+      const parsed = JSON.parse(storedUser)
+      currentUser.value = parsed
+      // Refresh with latest server data if available
+      const freshUser = store.users.find(u => u.id === parsed.id)
+      if (freshUser) {
+        currentUser.value = freshUser
+        localStorage.setItem('current_user', JSON.stringify(freshUser))
+      }
+    } catch {
+      localStorage.removeItem('current_user')
+    }
+  } else {
+    // Fallback: legacy last_user key
+    const lastUser = localStorage.getItem('last_user')
+    if (lastUser) {
+      const user = store.users.find(u => u.username === lastUser)
+      if (user) {
+        currentUser.value = user
+        localStorage.setItem('current_user', JSON.stringify(user))
+      }
+    }
   }
 
   // Migrate data: Assign unowned items to gyagp
