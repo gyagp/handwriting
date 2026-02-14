@@ -54,7 +54,7 @@ export interface CharacterCollection {
 }
 
 // 格子类型
-export type GridType = 'mi' | 'tian' | 'hui' | 'none'
+export type GridType = 'mi' | 'tian' | 'hui' | 'none' | 'text'
 
 // 图像处理结果 - 单个字符
 export interface ExtractedCharacter {

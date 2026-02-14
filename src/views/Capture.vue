@@ -325,7 +325,7 @@ const drawing = (e: MouseEvent | TouchEvent) => {
   drawBoxes()
 }
 
-const endDraw = async (e: MouseEvent | TouchEvent) => {
+const endDraw = async (_e: MouseEvent | TouchEvent) => {
   if (!isDrawing.value) return
   isDrawing.value = false
 

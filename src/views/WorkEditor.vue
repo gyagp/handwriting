@@ -154,7 +154,7 @@
         </div>
 
         <div
-          v-for="(item, idx) in charList"
+          v-for="(item) in charList"
           :key="item.index"
           class="char-box"
           @click="openSelector(item.index, item.char)"
@@ -323,18 +323,6 @@ const myRelatedWorks = ref<Work[]>([])
 const myRatings = ref<Record<string, number>>({})
 // Cache for related works samples to display previews
 const relatedSamplesCache = ref<Record<string, CharacterSample[]>>({})
-
-const isWorkComplete = computed(() => {
-  if (!work.value.content) return false
-  const validChars = work.value.content.split('').filter(c => /[a-zA-Z0-9\u4e00-\u9fa5]/.test(c))
-  if (validChars.length === 0) return false
-
-  return validChars.every(char => {
-    const samples = samplesCache.value[char]
-    if (!samples) return false
-    return samples.some(s => s.userId === work.value.userId)
-  })
-})
 
 const canChangeVisibility = computed(() => {
   if (currentUser.value?.role === 'admin') return true
@@ -684,7 +672,6 @@ const getMyWorkPreviewViewBox = (work: Work, index: number) => {
       }
 
       // Or sample viewBox
-      const char = work.content[index] // Simple access, assuming index matches
       const sampleId = work.charStyles?.[index]
       if (sampleId && relatedSamplesCache.value[work.id]) {
         const sample = relatedSamplesCache.value[work.id].find(s => s.id === sampleId)
@@ -1025,11 +1012,6 @@ const selectSample = (sampleId: string | null) => {
     delete work.value.charStyles[selectedIndex.value]
   }
   showSelector.value = false
-}
-
-const refreshRandom = () => {
-  work.value.charStyles = {} // 清空当前选择
-  randomizeStyles(work.value.content)
 }
 
 const save = async () => {

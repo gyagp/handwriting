@@ -318,12 +318,6 @@ const filteredWorks = computed(() => {
   return result.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
 })
 
-const allWorks = computed(() => works.value.filter(w => {
-  // Show my works (private/public) AND other's public works
-  if (w.userId === currentUser.value?.id && w.authorDeleted) return false
-  return filterWork(w)
-}))
-
 const handleRemove = async (work: Work) => {
   if (!isAdmin.value && work.visibility === 'public' && work.status === 'published') {
     showToast('已公开的作品无法删除')
@@ -426,7 +420,7 @@ const getCharContent = (work: Work, index: number, char: string) => {
   return sample ? sample.svgPath : char
 }
 
-const getCharViewBox = (work: Work, index: number, char: string) => {
+const getCharViewBox = (_work: Work, _index: number, char: string) => {
   const sample = samplesMap.value[char]
   return sample ? sample.svgViewBox : undefined
 }

@@ -134,7 +134,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { getSamplesByChar, deleteSample, saveSample, currentUser, getUnrefinedChars } from '@/services/db'
 import GridDisplay from '@/components/GridDisplay.vue'
 import type { CharacterSample, GridType } from '@/types'

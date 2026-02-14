@@ -39,7 +39,7 @@
     <CharacterRefinePanel
       v-else
       :char="char"
-      @select-char="(c) => $router.replace(`/character/${c}`)"
+      @select-char="(c: string) => $router.replace(`/character/${c}`)"
     />
 
     <div class="samples-section" v-if="!canEdit">
@@ -98,16 +98,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
-import { getSamplesByChar, deleteSample, getSettings, saveSample, saveRating, getMyRating, currentUser, getUsername, getCollectedStatsMap, getUnrefinedChars } from '@/services/db'
-import { getPinyin, getRadical, getStrokes, getGB2312Code, gb2312AllChars } from '@/data/gb2312-generator'
+import { ref, onMounted, computed, watch } from 'vue'
+import { getSamplesByChar, deleteSample, getSettings, saveRating, getMyRating, currentUser, getUsername, getUnrefinedChars } from '@/services/db'
 import GridDisplay from '@/components/GridDisplay.vue'
-import type { CharacterSample, AppSettings, GridType } from '@/types'
+import type { CharacterSample, AppSettings } from '@/types'
 import { showDialog, showToast } from 'vant'
-import { toRaw } from 'vue'
-
-const router = useRouter()
 
 const props = defineProps<{
   char: string
@@ -115,12 +110,9 @@ const props = defineProps<{
 
 const samples = ref<CharacterSample[]>([])
 const currentSample = ref<CharacterSample | null>(null)
-const collectedList = ref<string[]>([])
 const unrefinedList = ref<string[]>([])
 
 const mySamples = computed(() => samples.value.filter(s => s.userId === currentUser.value?.id))
-const myRefinedSamples = computed(() => mySamples.value.filter(s => s.isAdjusted))
-const myUnrefinedSamples = computed(() => mySamples.value.filter(s => !s.isAdjusted))
 const otherSamples = computed(() => samples.value.filter(s => s.userId !== currentUser.value?.id))
 
 const settings = ref<AppSettings>({
@@ -128,14 +120,6 @@ const settings = ref<AppSettings>({
   gridSize: 100,
   compressionLevel: 5,
   theme: 'light'
-})
-
-const currentGridType = ref<GridType>('mi')
-const editForm = ref({
-  scale: 1.0,
-  offsetX: 0,
-  offsetY: 0,
-  isAdjusted: false
 })
 
 const showRatingDialog = ref(false)
@@ -174,132 +158,6 @@ const submitRating = async () => {
   showToast('评分成功')
   await loadSamples()
 }
-
-const previewViewBox = computed(() => {
-  const { scale, offsetX, offsetY } = editForm.value
-  const width = 100 / scale
-  const height = 100 / scale
-  const minX = 50 - offsetX - width / 2
-  const minY = 50 - offsetY - height / 2
-  return `${minX} ${minY} ${width} ${height}`
-})
-
-watch(currentSample, (newSample) => {
-  if (newSample && canEdit.value) {
-      const viewBox = newSample.svgViewBox || '0 0 100 100'
-      const [minX, minY, width, height] = viewBox.split(' ').map(Number)
-      const scale = 100 / width
-      const offsetX = 50 - width / 2 - minX
-      const offsetY = 50 - height / 2 - minY
-
-      editForm.value = {
-        scale: Number(scale.toFixed(2)),
-        offsetX: Number(offsetX.toFixed(2)),
-        offsetY: Number(offsetY.toFixed(2)),
-        isAdjusted: !!newSample.isAdjusted
-      }
-      // Default grid type for editing
-      currentGridType.value = 'mi'
-  }
-}, { immediate: true })
-
-const saveAdjustment = async () => {
-  if (!currentSample.value) return
-
-  const { scale, offsetX, offsetY, isAdjusted } = editForm.value
-  const width = 100 / scale
-  const height = 100 / scale
-  const minX = 50 - offsetX - width / 2
-  const minY = 50 - offsetY - height / 2
-  const newViewBox = `${minX} ${minY} ${width} ${height}`
-
-  const updatedSample = {
-    ...toRaw(currentSample.value),
-    svgViewBox: newViewBox,
-    isAdjusted: isAdjusted
-  }
-
-  await saveSample(updatedSample)
-
-  // 更新本地数据
-  const index = samples.value.findIndex(s => s.id === updatedSample.id)
-  if (index !== -1) {
-    samples.value[index] = updatedSample
-  }
-  currentSample.value = updatedSample
-  showToast('保存成功')
-}
-
-// 交互逻辑
-const isDragging = ref(false)
-const startPos = ref({ x: 0, y: 0 })
-const startOffset = ref({ x: 0, y: 0 })
-
-const startDrag = (e: MouseEvent | TouchEvent) => {
-  isDragging.value = true
-  const clientX = 'touches' in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX
-  const clientY = 'touches' in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY
-
-  startPos.value = { x: clientX, y: clientY }
-  startOffset.value = { x: editForm.value.offsetX, y: editForm.value.offsetY }
-
-  window.addEventListener('mousemove', onDrag)
-  window.addEventListener('touchmove', onDrag, { passive: false })
-  window.addEventListener('mouseup', stopDrag)
-  window.addEventListener('touchend', stopDrag)
-}
-
-const onDrag = (e: MouseEvent | TouchEvent) => {
-  if (!isDragging.value) return
-  if (e.cancelable) e.preventDefault()
-
-  const clientX = 'touches' in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX
-  const clientY = 'touches' in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY
-
-  const deltaX = clientX - startPos.value.x
-  const deltaY = clientY - startPos.value.y
-
-  const scale = editForm.value.scale
-  // Adjust sensitivity based on display size (280px) vs coordinate system (100 units)
-  // 280px = 100 units => 1px = 100/280 units ~= 0.35 units
-  const svgDeltaX = deltaX * (100 / 280) / scale
-  const svgDeltaY = deltaY * (100 / 280) / scale
-
-  let newOffsetX = startOffset.value.x + svgDeltaX
-  let newOffsetY = startOffset.value.y + svgDeltaY
-
-  newOffsetX = Math.max(-200, Math.min(200, newOffsetX))
-  newOffsetY = Math.max(-200, Math.min(200, newOffsetY))
-
-  editForm.value.offsetX = Number(newOffsetX.toFixed(2))
-  editForm.value.offsetY = Number(newOffsetY.toFixed(2))
-}
-
-const stopDrag = () => {
-  isDragging.value = false
-  window.removeEventListener('mousemove', onDrag)
-  window.removeEventListener('touchmove', onDrag)
-  window.removeEventListener('mouseup', stopDrag)
-  window.removeEventListener('touchend', stopDrag)
-}
-
-const handleWheel = (e: WheelEvent) => {
-  const delta = e.deltaY > 0 ? -0.05 : 0.05
-  let newScale = editForm.value.scale + delta
-  newScale = Math.max(0.2, Math.min(2.0, newScale))
-  editForm.value.scale = Number(newScale.toFixed(2))
-}
-
-const charInfo = computed(() => {
-  if (!props.char) return null
-  return {
-    char: props.char,
-    code: getGB2312Code(props.char),
-    pinyin: getPinyin(props.char),
-    radical: getRadical(props.char),
-    strokes: getStrokes(props.char)
-  }
-})
 
 watch(() => props.char, () => {
   loadSamples()
