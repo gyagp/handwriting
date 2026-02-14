@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import crypto from 'crypto'
+import { randomUUID } from 'node:crypto'
 import { readBlobJson, writeBlobJson, blobPath } from './_lib/blob'
 import { hashPassword, verifyPassword, sanitizeUser } from './_lib/password'
 
@@ -68,7 +68,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { hash, salt } = hashPassword(password)
     const newUser = {
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       username,
       passwordHash: hash,
       passwordSalt: salt,

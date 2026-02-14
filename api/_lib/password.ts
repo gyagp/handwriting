@@ -1,12 +1,12 @@
-import crypto from 'crypto'
+import { randomBytes, pbkdf2Sync, timingSafeEqual } from 'node:crypto'
 
 /**
  * Hash a password using PBKDF2 with a random salt.
  * Returns { hash, salt } for storage.
  */
 export function hashPassword(password: string, salt?: string): { hash: string; salt: string } {
-  const s = salt || crypto.randomBytes(16).toString('hex')
-  const hash = crypto.pbkdf2Sync(password, s, 100000, 64, 'sha512').toString('hex')
+  const s = salt || randomBytes(16).toString('hex')
+  const hash = pbkdf2Sync(password, s, 100000, 64, 'sha512').toString('hex')
   return { hash, salt: s }
 }
 
@@ -16,7 +16,7 @@ export function hashPassword(password: string, salt?: string): { hash: string; s
  */
 export function verifyPassword(password: string, storedHash: string, storedSalt: string): boolean {
   const { hash } = hashPassword(password, storedSalt)
-  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(storedHash, 'hex'))
+  return timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(storedHash, 'hex'))
 }
 
 /**
