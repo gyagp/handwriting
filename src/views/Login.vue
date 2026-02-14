@@ -18,8 +18,8 @@
         />
         <div class="actions">
           <van-button type="primary" block @click="handleLogin" :loading="loading">登录</van-button>
-          <van-button plain block type="primary" @click="handleRegister" style="margin-top: 12px">注册新用户</van-button>
-          <van-button plain block type="default" @click="handleGuestLogin" style="margin-top: 12px">游客试用</van-button>
+          <!-- <van-button plain block type="primary" @click="handleRegister" style="margin-top: 12px">注册新用户</van-button> -->
+          <van-button plain block type="default" @click="handleGuestLogin" style="margin-top: 12px">游客</van-button>
         </div>
       </div>
     </div>

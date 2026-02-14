@@ -5,13 +5,31 @@ import { put, list } from '@vercel/blob'
 const BLOB_PREFIX = 'data/'
 function blobPath(p: string) { return `${BLOB_PREFIX}${p}` }
 
+// In-memory cache (persists across requests in warm serverless instances)
+let _storeUrl: string | null = null
+const _cache = new Map<string, { json: string; ts: number }>()
+const CACHE_TTL = 30_000 // 30 seconds
+
+async function getStoreUrl(): Promise<string | null> {
+  if (_storeUrl) return _storeUrl
+  const { blobs } = await list({ limit: 1 })
+  if (blobs.length > 0) {
+    _storeUrl = new URL(blobs[0].url).origin
+  }
+  return _storeUrl
+}
+
 async function readBlobJson(pathname: string): Promise<any | null> {
+  const entry = _cache.get(pathname)
+  if (entry && Date.now() - entry.ts < CACHE_TTL) return JSON.parse(entry.json)
   try {
-    const { blobs } = await list({ prefix: pathname, limit: 10 })
-    const blob = blobs.find(b => b.pathname === pathname)
-    if (!blob) return null
-    const response = await fetch(blob.url)
-    return await response.json()
+    const storeUrl = await getStoreUrl()
+    if (!storeUrl) return null
+    const response = await fetch(`${storeUrl}/${pathname}`)
+    if (!response.ok) return null
+    const data = await response.json()
+    _cache.set(pathname, { json: JSON.stringify(data), ts: Date.now() })
+    return data
   } catch { return null }
 }
 
@@ -19,6 +37,8 @@ async function writeBlobJson(pathname: string, data: any): Promise<void> {
   await put(pathname, JSON.stringify(data, null, 2), {
     access: 'public', addRandomSuffix: false, contentType: 'application/json',
   })
+  // Write-through: update cache immediately
+  _cache.set(pathname, { json: JSON.stringify(data), ts: Date.now() })
 }
 
 function hashPassword(password: string, salt?: string) {
@@ -61,33 +81,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         systemData.ratings.push(rating)
       }
 
-      await writeBlobJson(systemPath, systemData)
+      // Compute average score in memory (no extra reads needed)
+      const targetRatings = targetUserId ? systemData.ratings.filter(
+        (r: any) => r.targetId === targetId && r.targetType === targetType
+      ) : []
+      const avg = targetRatings.length > 0
+        ? Math.round((targetRatings.reduce((sum: number, r: any) => sum + r.score, 0) / targetRatings.length) * 10) / 10
+        : 0
 
-      // Compute average and update the target's score in the owner's data
-      if (targetUserId) {
-        const targetRatings = systemData.ratings.filter(
-          (r: any) => r.targetId === targetId && r.targetType === targetType
-        )
-        const total = targetRatings.reduce((sum: number, r: any) => sum + r.score, 0)
-        const avg = Math.round((total / targetRatings.length) * 10) / 10
+      if (targetUserId && targetRatings.length > 0) {
+        const fileType = targetType === 'sample' ? 'samples' : 'works'
+        const userDataPath = blobPath(`users/${targetUserId}/${fileType}.json`)
 
-        if (targetType === 'sample') {
-          const samplesPath = blobPath(`users/${targetUserId}/samples.json`)
-          const samples = (await readBlobJson(samplesPath)) || []
-          const sample = samples.find((s: any) => s.id === targetId)
-          if (sample) {
-            sample.score = avg
-            await writeBlobJson(samplesPath, samples)
-          }
-        } else if (targetType === 'work') {
-          const worksPath = blobPath(`users/${targetUserId}/works.json`)
-          const works = (await readBlobJson(worksPath)) || []
-          const work = works.find((w: any) => w.id === targetId)
-          if (work) {
-            work.score = avg
-            await writeBlobJson(worksPath, works)
+        // Parallelize: write system.json AND read user data simultaneously
+        const [, userData] = await Promise.all([
+          writeBlobJson(systemPath, systemData),
+          readBlobJson(userDataPath),
+        ])
+
+        if (Array.isArray(userData)) {
+          const item = userData.find((x: any) => x.id === targetId)
+          if (item) {
+            item.score = avg
+            await writeBlobJson(userDataPath, userData)
           }
         }
+      } else {
+        await writeBlobJson(systemPath, systemData)
       }
 
       return res.status(200).json({ ok: true })

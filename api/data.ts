@@ -1,22 +1,19 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { put, list } from '@vercel/blob'
+import { list } from '@vercel/blob'
 
-const BLOB_PREFIX = 'data/'
-function blobPath(p: string) { return `${BLOB_PREFIX}${p}` }
+// In-memory cache (persists across requests in warm serverless instances)
+const _cache = new Map<string, { json: string; ts: number }>()
+let _urlMapCache: { map: Map<string, string>; blobs: any[]; ts: number } | null = null
+const CACHE_TTL = 30_000 // 30 seconds
 
-async function readBlobJson(pathname: string): Promise<any | null> {
-  try {
-    const { blobs } = await list({ prefix: pathname, limit: 10 })
-    const blob = blobs.find(b => b.pathname === pathname)
-    if (!blob) return null
-    const response = await fetch(blob.url)
-    return await response.json()
-  } catch { return null }
+function getCached(key: string): any | undefined {
+  const e = _cache.get(key)
+  if (e && Date.now() - e.ts < CACHE_TTL) return JSON.parse(e.json)
+  return undefined
 }
 
-async function listBlobsByPrefix(prefix: string) {
-  const { blobs } = await list({ prefix })
-  return blobs
+function setCache(key: string, data: any) {
+  _cache.set(key, { json: JSON.stringify(data), ts: Date.now() })
 }
 
 function sanitizeUser(user: any): any {
@@ -26,6 +23,8 @@ function sanitizeUser(user: any): any {
 
 /**
  * GET /api/data — Load all application data.
+ * Optimized: in-memory cache + single list() + parallel fetch().
+ * Warm instances with valid cache: 0 network calls.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -36,6 +35,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') return res.status(405).send('Method not allowed')
 
   try {
+    const noCache = req.query.nocache === '1'
+
+    // Get blob URL map (cached or fresh)
+    let urlMap: Map<string, string>
+    let allBlobs: any[]
+    if (!noCache && _urlMapCache && Date.now() - _urlMapCache.ts < CACHE_TTL) {
+      urlMap = _urlMapCache.map
+      allBlobs = _urlMapCache.blobs
+    } else {
+      const result = await list({ prefix: 'data/' })
+      allBlobs = result.blobs
+      urlMap = new Map(allBlobs.map((b: any) => [b.pathname, b.url]))
+      _urlMapCache = { map: urlMap, blobs: allBlobs, ts: Date.now() }
+    }
+
+    // Fetch JSON with per-blob cache
+    const fetchBlob = async (pathname: string) => {
+      if (!noCache) {
+        const cached = getCached(pathname)
+        if (cached !== undefined) return cached
+      }
+      const url = urlMap.get(pathname)
+      if (!url) return null
+      try {
+        const r = await fetch(url)
+        if (!r.ok) return null
+        const data = await r.json()
+        setCache(pathname, data)
+        return data
+      } catch { return null }
+    }
+
+    // Identify user data blobs
+    const userBlobs = allBlobs.filter((b: any) =>
+      /^data\/users\/[^/]+\/(samples|works)\.json$/.test(b.pathname)
+    )
+
+    // Fetch all in parallel (cache hits skip network entirely)
+    const fetchPromises = [
+      fetchBlob('data/system.json'),
+      fetchBlob('data/works.json'),
+      ...userBlobs.map(async (b: any) => ({
+        pathname: b.pathname,
+        data: await fetchBlob(b.pathname),
+      }))
+    ]
+
+    const [systemData, publicWorksData, ...userResults] = await Promise.all(fetchPromises)
+
     const responseData: any = {
       users: [],
       samples: [],
@@ -44,67 +92,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       settings: null,
     }
 
-    const systemData = await readBlobJson(blobPath('system.json'))
     if (systemData) {
-      // Strip passwords from users
       responseData.users = (systemData.users || []).map(sanitizeUser)
       responseData.ratings = systemData.ratings || []
       responseData.settings = systemData.settings || null
+    }
 
-      // Load public works
-      const worksMap = new Map<string, any>()
-      const publicWorks = await readBlobJson(blobPath('works.json'))
-      if (Array.isArray(publicWorks)) {
-        publicWorks.forEach((w: any) => worksMap.set(w.id, w))
+    // Build works map from public works + user works
+    const worksMap = new Map<string, any>()
+    if (Array.isArray(publicWorksData)) {
+      publicWorksData.forEach((w: any) => worksMap.set(w.id, w))
+    }
+
+    // Process user blobs
+    for (const result of userResults) {
+      if (!result?.data || !Array.isArray(result.data)) continue
+      const match = result.pathname.match(/^data\/users\/([^/]+)\/(samples|works)\.json$/)
+      if (!match) continue
+      const [, userId, fileType] = match
+
+      if (fileType === 'samples') {
+        result.data.forEach((s: any) => { s.userId = userId })
+        responseData.samples.push(...result.data)
+      } else if (fileType === 'works') {
+        result.data.forEach((w: any) => { w.userId = userId; worksMap.set(w.id, w) })
       }
+    }
 
-      // Load all user data blobs in parallel
-      const blobs = await listBlobsByPrefix(blobPath('users/'))
-      const fetchPromises = blobs
-        .filter(blob => /^data\/users\/[^/]+\/(samples|works)\.json$/.test(blob.pathname))
-        .map(async (blob) => {
-          const match = blob.pathname.match(/^data\/users\/([^/]+)\/(samples|works)\.json$/)
-          if (!match) return
-          const [, userId, fileType] = match
+    responseData.works = Array.from(worksMap.values())
 
-          try {
-            const response = await fetch(blob.url)
-            const fileData = await response.json()
-
-            if (fileType === 'samples' && Array.isArray(fileData)) {
-              fileData.forEach((s: any) => (s.userId = userId))
-              responseData.samples.push(...fileData)
-            } else if (fileType === 'works' && Array.isArray(fileData)) {
-              fileData.forEach((w: any) => {
-                w.userId = userId
-                worksMap.set(w.id, w)
-              })
-            }
-          } catch (e) {
-            console.error(`Failed to read ${blob.pathname}:`, e)
-          }
-        })
-
-      await Promise.all(fetchPromises)
-      responseData.works = Array.from(worksMap.values())
-
-      // Compute scores from ratings so they are always up-to-date
-      const ratingsByTarget = new Map<string, { total: number; count: number }>()
-      for (const r of responseData.ratings) {
-        const key = `${r.targetType}:${r.targetId}`
-        if (!ratingsByTarget.has(key)) ratingsByTarget.set(key, { total: 0, count: 0 })
-        const entry = ratingsByTarget.get(key)!
-        entry.total += r.score
-        entry.count++
-      }
-      for (const s of responseData.samples) {
-        const entry = ratingsByTarget.get(`sample:${s.id}`)
-        if (entry) s.score = Math.round((entry.total / entry.count) * 10) / 10
-      }
-      for (const w of responseData.works) {
-        const entry = ratingsByTarget.get(`work:${w.id}`)
-        if (entry) w.score = Math.round((entry.total / entry.count) * 10) / 10
-      }
+    // Compute scores from ratings
+    const ratingsByTarget = new Map<string, { total: number; count: number }>()
+    for (const r of responseData.ratings) {
+      const key = `${r.targetType}:${r.targetId}`
+      if (!ratingsByTarget.has(key)) ratingsByTarget.set(key, { total: 0, count: 0 })
+      const entry = ratingsByTarget.get(key)!
+      entry.total += r.score
+      entry.count++
+    }
+    for (const s of responseData.samples) {
+      const entry = ratingsByTarget.get(`sample:${s.id}`)
+      if (entry) s.score = Math.round((entry.total / entry.count) * 10) / 10
+    }
+    for (const w of responseData.works) {
+      const entry = ratingsByTarget.get(`work:${w.id}`)
+      if (entry) w.score = Math.round((entry.total / entry.count) * 10) / 10
     }
 
     return res.status(200).json(responseData)
