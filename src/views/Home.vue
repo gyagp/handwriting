@@ -40,6 +40,7 @@
         <CharacterRefinePanel
           :char="currentRefineChar || displayList[0].char"
           @select-char="(c) => currentRefineChar = c"
+          @data-changed="loadData"
         />
       </div>
       <div v-else class="empty-tip">

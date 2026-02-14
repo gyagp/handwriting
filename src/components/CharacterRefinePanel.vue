@@ -147,6 +147,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'select-char', char: string): void
+  (e: 'data-changed'): void
 }>()
 
 const samples = ref<CharacterSample[]>([])
@@ -241,6 +242,7 @@ const saveAdjustment = async () => {
 
   await loadSamples()
   await loadUnrefined()
+  emit('data-changed')
 }
 
 const onSelectSample = (sample: CharacterSample) => {
@@ -261,6 +263,7 @@ const handleDelete = (sample: CharacterSample) => {
       await deleteSample(sample.id)
       await loadSamples()
       await loadUnrefined()
+      emit('data-changed')
       showToast('已删除')
     }
   })
