@@ -1,10 +1,31 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { readBlobJson, listBlobsByPrefix, blobPath } from './_lib/blob'
-import { sanitizeUser } from './_lib/password'
+import { put, list } from '@vercel/blob'
+
+const BLOB_PREFIX = 'data/'
+function blobPath(p: string) { return `${BLOB_PREFIX}${p}` }
+
+async function readBlobJson(pathname: string): Promise<any | null> {
+  try {
+    const { blobs } = await list({ prefix: pathname, limit: 10 })
+    const blob = blobs.find(b => b.pathname === pathname)
+    if (!blob) return null
+    const response = await fetch(blob.url)
+    return await response.json()
+  } catch { return null }
+}
+
+async function listBlobsByPrefix(prefix: string) {
+  const { blobs } = await list({ prefix })
+  return blobs
+}
+
+function sanitizeUser(user: any): any {
+  const { password, passwordHash, passwordSalt, ...safe } = user
+  return safe
+}
 
 /**
  * GET /api/data — Load all application data.
- * Passwords are stripped. Scores are computed from ratings for consistency.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*')

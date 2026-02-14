@@ -1,7 +1,41 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { randomUUID } from 'node:crypto'
-import { readBlobJson, writeBlobJson, blobPath } from './_lib/blob'
-import { hashPassword, verifyPassword, sanitizeUser } from './_lib/password'
+import { randomUUID, randomBytes, pbkdf2Sync, timingSafeEqual } from 'node:crypto'
+import { put, list } from '@vercel/blob'
+
+const BLOB_PREFIX = 'data/'
+function blobPath(p: string) { return `${BLOB_PREFIX}${p}` }
+
+async function readBlobJson(pathname: string): Promise<any | null> {
+  try {
+    const { blobs } = await list({ prefix: pathname, limit: 10 })
+    const blob = blobs.find(b => b.pathname === pathname)
+    if (!blob) return null
+    const response = await fetch(blob.url)
+    return await response.json()
+  } catch { return null }
+}
+
+async function writeBlobJson(pathname: string, data: any): Promise<void> {
+  await put(pathname, JSON.stringify(data, null, 2), {
+    access: 'public', addRandomSuffix: false, contentType: 'application/json',
+  })
+}
+
+function hashPassword(password: string, salt?: string) {
+  const s = salt || randomBytes(16).toString('hex')
+  const hash = pbkdf2Sync(password, s, 100000, 64, 'sha512').toString('hex')
+  return { hash, salt: s }
+}
+
+function verifyPassword(password: string, storedHash: string, storedSalt: string) {
+  const { hash } = hashPassword(password, storedSalt)
+  return timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(storedHash, 'hex'))
+}
+
+function sanitizeUser(user: any): any {
+  const { password, passwordHash, passwordSalt, ...safe } = user
+  return safe
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*')

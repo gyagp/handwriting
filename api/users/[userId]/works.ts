@@ -1,5 +1,24 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { readBlobJson, writeBlobJson, blobPath } from '../../_lib/blob'
+import { put, list } from '@vercel/blob'
+
+const BLOB_PREFIX = 'data/'
+function blobPath(p: string) { return `${BLOB_PREFIX}${p}` }
+
+async function readBlobJson(pathname: string): Promise<any | null> {
+  try {
+    const { blobs } = await list({ prefix: pathname, limit: 10 })
+    const blob = blobs.find(b => b.pathname === pathname)
+    if (!blob) return null
+    const response = await fetch(blob.url)
+    return await response.json()
+  } catch { return null }
+}
+
+async function writeBlobJson(pathname: string, data: any): Promise<void> {
+  await put(pathname, JSON.stringify(data, null, 2), {
+    access: 'public', addRandomSuffix: false, contentType: 'application/json',
+  })
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*')
