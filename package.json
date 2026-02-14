@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@vant/use": "^1.6.0",
+    "@vercel/blob": "^0.27.0",
     "pako": "^2.1.0",
     "pinia": "^2.1.7",
     "potrace": "^2.1.8",
@@ -19,6 +20,7 @@
     "vue-router": "^4.2.5"
   },
   "devDependencies": {
+    "@vercel/node": "^5.0.0",
     "@types/pako": "^2.0.3",
     "@vant/auto-import-resolver": "^1.2.1",
     "@vitejs/plugin-vue": "^5.0.0",

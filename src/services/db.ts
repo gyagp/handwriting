@@ -24,7 +24,7 @@ let allowedChars: Set<string> | null = null
 
 function getAllowedChars(): Set<string> {
   if (!allowedChars) {
-    const punctuation = ['，', '。', '！', '？', '、', '；', '：', '“', '”', '‘', '’', '（', '）', '【', '】', '《', '》', '…', '—', '·']
+    const punctuation = ['，', '。', '！', '？', '、', '；', '：', '"', '"', '\u2018', '\u2019', '（', '）', '【', '】', '《', '》', '…', '—', '·']
     allowedChars = new Set([
       ...generateGB2312Level1Chars(),
       ...generateGB2312Level2Chars(),
@@ -37,73 +37,158 @@ function getAllowedChars(): Set<string> {
 // Current User State
 export const currentUser = ref<User | null>(null)
 
-// --- User Management ---
+// =============================================
+// Granular sync helpers (replace old syncToFile)
+// =============================================
 
-function getUsernameLength(str: string) {
-  let len = 0
-  for (const char of str) {
-    if (/[\u4e00-\u9fa5]/.test(char)) {
-      len += 2
-    } else {
-      len += 1
-    }
+/** Save current user's samples to server */
+async function syncSamples() {
+  if (!currentUser.value || currentUser.value.role === 'guest') return
+  const userId = currentUser.value.id
+  const mySamples = store.samples.filter(s => s.userId === userId)
+  try {
+    await fetch(`/api/users/${userId}/samples`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(mySamples)
+    })
+  } catch (e) {
+    console.error('Sync samples failed:', e)
   }
-  return len
 }
 
+/** Save current user's works to server */
+async function syncWorks() {
+  if (!currentUser.value || currentUser.value.role === 'guest') return
+  const userId = currentUser.value.id
+  const myWorks = store.works.filter(w => w.userId === userId)
+  try {
+    await fetch(`/api/users/${userId}/works`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(myWorks)
+    })
+  } catch (e) {
+    console.error('Sync works failed:', e)
+  }
+}
+
+/** Save a rating to server */
+async function syncRating(userId: string, targetId: string, targetType: string, score: number, targetUserId?: string) {
+  try {
+    await fetch('/api/system', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'saveRating',
+        payload: { userId, targetId, targetType, score, targetUserId }
+      })
+    })
+  } catch (e) {
+    console.error('Sync rating failed:', e)
+  }
+}
+
+/** Save settings to server */
+async function syncSettingsToServer(settings: Partial<AppSettings>) {
+  try {
+    await fetch('/api/system', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'saveSettings', payload: settings })
+    })
+  } catch (e) {
+    console.error('Sync settings failed:', e)
+  }
+}
+
+/** Update user fields on server */
+async function syncUserUpdate(userId: string, updates: Record<string, any>) {
+  try {
+    await fetch('/api/system', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'updateUser',
+        payload: { userId, updates }
+      })
+    })
+  } catch (e) {
+    console.error('Sync user update failed:', e)
+  }
+}
+
+// Legacy syncToFile — kept as no-op for backward compat
+export async function syncToFile() {
+  // No-op: granular sync functions are used instead
+}
+
+// =============================================
+// Data loading
+// =============================================
+
+export async function loadFromFile() {
+  try {
+    const res = await fetch('/api/data?t=' + Date.now())
+    if (!res.ok) return
+
+    const data = await res.json()
+
+    store.users = data.users || []
+    store.samples = data.samples || []
+    store.works = data.works || []
+    store.ratings = data.ratings || []
+    store.settings = data.settings || null
+
+    // Migration: Convert 100-point scale to 10-point scale (local only)
+    store.ratings.forEach(r => {
+      if (r.score > 10) r.score = r.score / 10
+    })
+    store.samples.forEach(s => {
+      if (s.score && s.score > 10) s.score = s.score / 10
+    })
+    store.works.forEach(w => {
+      if (w.score && w.score > 10) w.score = w.score / 10
+    })
+  } catch (e) {
+    console.error('Load from file failed:', e)
+  }
+}
+
+// =============================================
+// User Management
+// =============================================
+
 export async function registerUser(username: string, password?: string): Promise<User> {
-  // Username validation
-  if (!username) throw new Error('用户名不能为空')
+  // Server handles validation, hashing, and storage
+  const res = await fetch('/api/auth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'register', username, password })
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || '注册失败')
 
-  // Check allowed characters: Chinese, numbers, letters, _, ., -
-  if (!/^[\u4e00-\u9fa5a-zA-Z0-9_.-]+$/.test(username)) {
-    throw new Error('用户名只允许使用汉字、数字、字母、下划线、点和短横线')
-  }
-
-  const nameLen = getUsernameLength(username)
-  if (nameLen < 4 || nameLen > 30) {
-    throw new Error('用户名长度需为4至30个字符(1个汉字=2个字符)')
-  }
-
-  // Password validation
-  if (!password) throw new Error('密码不能为空')
-  if (password.length < 7 || password.length > 16) {
-    throw new Error('密码长度必须是7-16位')
-  }
-  if (/^\d+$/.test(password)) {
-    throw new Error('密码不能是纯数字')
-  }
-  // Optional: Check if password contains only allowed characters (letters, numbers, symbols)
-  // The requirement says "英文字母、数字、字符组合", usually implies ASCII printable characters.
-  // Let's assume standard keyboard characters.
-
-  if (store.users.find(u => u.username === username)) {
-    throw new Error('用户名已存在')
-  }
-  const user: User = {
-    id: crypto.randomUUID(),
-    username,
-    password,
-    role: 'user',
-    createdAt: Date.now(),
-    collectionVisibility: 'private'
-  }
+  const user = data.user as User
   store.users.push(user)
-  await syncToFile()
   return user
 }
 
 export async function loginUser(username: string, password?: string): Promise<User> {
-  const user = store.users.find(u => u.username === username)
-  if (!user) {
-    throw new Error('User not found')
-  }
-  // In a real app, check password. For now, simple login.
-  if (user.password && user.password !== password) {
-     throw new Error('Invalid password')
-  }
-  // Ensure default visibility
-  if (!user.collectionVisibility) user.collectionVisibility = 'private'
+  // Server verifies password (hashed comparison)
+  const res = await fetch('/api/auth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'login', username, password })
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || '登录失败')
+
+  const user = data.user as User
+  // Update local store with server-returned user (no password fields)
+  const idx = store.users.findIndex(u => u.id === user.id)
+  if (idx >= 0) store.users[idx] = user
+  else store.users.push(user)
 
   currentUser.value = user
   localStorage.setItem('last_user', user.username)
@@ -141,9 +226,26 @@ export async function updateUser(user: User) {
   const index = store.users.findIndex(u => u.id === user.id)
   if (index === -1) throw new Error('User not found')
 
-  // Prevent modifying admin itself via this if needed, but admin can modify admin
-  store.users[index] = user
-  await syncToFile()
+  // If password is being reset, do it via the dedicated server endpoint
+  if (user.password) {
+    const res = await fetch('/api/system', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'resetPassword',
+        payload: { userId: user.id, newPassword: user.password }
+      })
+    })
+    if (!res.ok) {
+      const data = await res.json()
+      throw new Error(data.error || '更新失败')
+    }
+  }
+
+  // Update other fields (role, etc.) via updateUser
+  const { password: _, ...safeUser } = user
+  store.users[index] = safeUser as User
+  await syncUserUpdate(user.id, { role: user.role })
 }
 
 export function getUsername(userId: string): string {
@@ -153,138 +255,90 @@ export function getUsername(userId: string): string {
   return 'Unknown'
 }
 
-// --- 文件同步逻辑 ---
-export async function syncToFile() {
-  try {
-    await fetch('/api/data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(store)
-    })
-  } catch (e) {
-    console.error('Sync to file failed:', e)
-  }
-}
+// =============================================
+// App Initialization
+// =============================================
 
-export async function loadFromFile() {
-  try {
-    const res = await fetch('/api/data?t=' + Date.now())
-    if (!res.ok) return
-
-    const data = await res.json()
-
-    store.users = data.users || []
-    store.samples = data.samples || []
-    store.works = data.works || []
-    store.ratings = data.ratings || []
-    store.settings = data.settings || null
-
-    // Migration: Convert 100-point scale to 10-point scale
-    let migrationNeeded = false
-    store.ratings.forEach(r => {
-      if (r.score > 10) {
-        r.score = r.score / 10
-        migrationNeeded = true
-      }
-    })
-    store.samples.forEach(s => {
-      if (s.score && s.score > 10) {
-        s.score = s.score / 10
-        migrationNeeded = true
-      }
-    })
-    store.works.forEach(w => {
-      if (w.score && w.score > 10) {
-        w.score = w.score / 10
-        migrationNeeded = true
-      }
-    })
-
-    if (migrationNeeded) {
-      await syncToFile()
-    }
-
-  } catch (e) {
-    console.error('Load from file failed:', e)
-  }
-}
-
-// 初始化设置
 export async function initSettings() {
-  // 尝试从文件加载
   await loadFromFile()
 
-  // Ensure admin user exists
+  // Ensure admin user exists (registration via API if needed)
   let adminUser = store.users.find(u => u.username === 'admin')
   if (!adminUser) {
-    adminUser = {
-      id: crypto.randomUUID(),
-      username: 'admin',
-      password: 'admin12345',
-      role: 'admin',
-      createdAt: Date.now()
-    }
-    store.users.push(adminUser)
-  } else {
-    if (adminUser.role !== 'admin') {
-      adminUser.role = 'admin'
-    }
-    if (adminUser.password !== 'admin12345') {
-      adminUser.password = 'admin12345'
+    // Create admin via register endpoint
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'register', username: 'admin', password: 'admin12345' })
+      })
+      const data = await res.json()
+      if (res.ok) {
+        adminUser = data.user
+        store.users.push(adminUser!)
+        // Set role to admin
+        await syncUserUpdate(adminUser!.id, { role: 'admin' })
+        adminUser!.role = 'admin'
+      }
+    } catch (e) {
+      console.error('Failed to create admin user:', e)
     }
   }
 
   // Ensure gyagp user exists
   let gyagpUser = store.users.find(u => u.username === 'gyagp')
   if (!gyagpUser) {
-    gyagpUser = {
-      id: crypto.randomUUID(),
-      username: 'gyagp',
-      password: 'gy12345',
-      role: 'user',
-      createdAt: Date.now()
-    }
-    store.users.push(gyagpUser)
-  } else {
-    if (gyagpUser.role !== 'user') {
-      gyagpUser.role = 'user'
-    }
-    if (gyagpUser.password !== 'gy12345') {
-      gyagpUser.password = 'gy12345'
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'register', username: 'gyagp', password: 'gy12345' })
+      })
+      const data = await res.json()
+      if (res.ok) {
+        gyagpUser = data.user
+        store.users.push(gyagpUser!)
+      }
+    } catch (e) {
+      console.error('Failed to create gyagp user:', e)
     }
   }
 
-  // Auto login default user or last user
+  // Auto login last user
   const lastUser = localStorage.getItem('last_user')
   if (lastUser) {
-      const user = store.users.find(u => u.username === lastUser)
-      if (user) currentUser.value = user
+    const user = store.users.find(u => u.username === lastUser)
+    if (user) currentUser.value = user
   }
 
-  // If no user logged in, login gyagp
-  // if (!currentUser.value) {
-  //     currentUser.value = gyagpUser
-  // }
-
   // Migrate data: Assign unowned items to gyagp
-  // const adminUser = store.users.find(u => u.role === 'admin') // Already declared above
+  if (gyagpUser) {
+    let samplesChanged = false
+    let worksChanged = false
 
-  store.samples.forEach(s => {
+    store.samples.forEach(s => {
       if (!s.userId || (adminUser && s.userId === adminUser.id)) {
-          s.userId = gyagpUser!.id
-          if (!s.visibility) s.visibility = 'private'
+        s.userId = gyagpUser!.id
+        if (!s.visibility) s.visibility = 'private'
+        samplesChanged = true
       }
-  })
-  store.works.forEach(w => {
+    })
+    store.works.forEach(w => {
       if (!w.userId || (adminUser && w.userId === adminUser.id)) {
-          w.userId = gyagpUser!.id
-          if (!w.visibility) w.visibility = 'public'
-          if (!w.status) w.status = 'published'
+        w.userId = gyagpUser!.id
+        if (!w.visibility) w.visibility = 'public'
+        if (!w.status) w.status = 'published'
+        worksChanged = true
       }
       if (!w.status) {
         w.status = w.visibility === 'public' ? 'published' : 'draft'
+        worksChanged = true
       }
-  })
+    })
+
+    if (samplesChanged) await syncSamples()
+    if (worksChanged) await syncWorks()
+  }
 
   if (!store.settings) {
     store.settings = {
@@ -378,11 +432,13 @@ export async function initDefaultWorks() {
   }
 
   if (hasNew) {
-    await syncToFile()
+    await syncWorks()
   }
 }
 
-// --- Rating System ---
+// =============================================
+// Rating System
+// =============================================
 
 export async function saveRating(targetId: string, targetType: 'sample' | 'work', score: number) {
   if (!currentUser.value) throw new Error('Must be logged in')
@@ -408,10 +464,21 @@ export async function saveRating(targetId: string, targetType: 'sample' | 'work'
     })
   }
 
-  // Update average score on target
+  // Find the owner of the target for server-side score update
+  let targetUserId: string | undefined
+  if (targetType === 'sample') {
+    const sample = store.samples.find(s => s.id === targetId)
+    targetUserId = sample?.userId
+  } else {
+    const work = store.works.find(w => w.id === targetId)
+    targetUserId = work?.userId
+  }
+
+  // Update average score locally
   updateAverageScore(targetId, targetType)
 
-  await syncToFile()
+  // Send to server (granular)
+  await syncRating(currentUser.value.id, targetId, targetType, score, targetUserId)
 }
 
 function updateAverageScore(targetId: string, targetType: 'sample' | 'work') {
@@ -419,7 +486,6 @@ function updateAverageScore(targetId: string, targetType: 'sample' | 'work') {
   if (ratings.length === 0) return
 
   const total = ratings.reduce((sum, r) => sum + r.score, 0)
-  // Keep 1 decimal place
   const avg = Math.round((total / ratings.length) * 10) / 10
 
   if (targetType === 'sample') {
@@ -441,18 +507,23 @@ export function getMyRating(targetId: string, targetType: 'sample' | 'work'): nu
   return rating?.score
 }
 
-// 获取设置
+// =============================================
+// Settings
+// =============================================
+
 export async function getSettings(): Promise<AppSettings> {
   return store.settings as AppSettings
 }
 
-// 保存设置
 export async function saveSettings(settings: Partial<AppSettings>) {
   store.settings = { ...store.settings, ...settings } as AppSettings
-  await syncToFile()
+  await syncSettingsToServer(settings)
 }
 
-// 保存样本
+// =============================================
+// Samples
+// =============================================
+
 export async function saveSample(sample: CharacterSample) {
   if (!currentUser.value) throw new Error('Must be logged in')
 
@@ -461,21 +532,17 @@ export async function saveSample(sample: CharacterSample) {
     throw new Error(`Character '${sample.char}' is not in the allowed character set (GB2312).`)
   }
 
-  // Check if sample exists (by id)
   const index = store.samples.findIndex(s => s.id === sample.id)
 
   if (currentUser.value.role === 'admin') {
     if (index === -1) {
       throw new Error('Admin cannot create samples')
     }
-    // Admin can only modify public samples
     if (store.samples[index].visibility !== 'public') {
       throw new Error('Admin can only manage public data')
     }
-    // Allow update
     store.samples[index] = sample
   } else {
-    // Normal user
     if (index >= 0) {
       if (store.samples[index].userId !== currentUser.value.id) {
         throw new Error('Permission denied')
@@ -484,90 +551,72 @@ export async function saveSample(sample: CharacterSample) {
     } else {
       sample.userId = currentUser.value.id
       if (!sample.visibility) {
-        // Use default visibility from settings if available
         sample.visibility = store.settings?.defaultVisibility || 'private'
       }
       store.samples.push(sample)
     }
   }
-  await syncToFile()
+  await syncSamples()
 }
 
 export async function setAllVisibility(visibility: 'public' | 'private') {
   if (!currentUser.value) throw new Error('Must be logged in')
 
-  // Update user setting
   const userIndex = store.users.findIndex(u => u.id === currentUser.value!.id)
   if (userIndex >= 0) {
     store.users[userIndex].collectionVisibility = visibility
     currentUser.value.collectionVisibility = visibility
-    await syncToFile()
+    await syncUserUpdate(currentUser.value.id, { collectionVisibility: visibility })
   }
 }
 
-// 获取某个字的所有样本
 export async function getSamplesByChar(char: string): Promise<CharacterSample[]> {
-  // Ensure we have the latest data from other users
   await loadFromFile()
 
   const currentUserId = currentUser.value?.id
-  const isAdmin = currentUser.value?.role === 'admin'
 
   return store.samples
     .filter(s => s.char === char)
     .filter(s => {
-      // My samples
       if (s.userId === currentUserId) return true
-      // Admin samples (always public if marked public)
       const owner = store.users.find(u => u.id === s.userId)
       if (owner?.role === 'admin' && s.visibility === 'public') return true
-      // Other users' samples: Public Collection AND Refined
       if (owner?.role === 'user' && owner.collectionVisibility === 'public' && s.isRefined) return true
-
       return false
     })
     .sort((a, b) => {
-      // Current user's samples always come first
       if (a.userId === currentUserId && b.userId !== currentUserId) return -1
       if (b.userId === currentUserId && a.userId !== currentUserId) return 1
-      // Then sort by score desc
       return (b.score || 0) - (a.score || 0)
     })
 }
 
-// 获取所有已收集的字
 export async function getCollectedChars(): Promise<string[]> {
   await loadFromFile()
   const currentUserId = currentUser.value?.id
-
-  // Only return chars that have at least one visible sample
   const chars = new Set<string>()
 
   for (const s of store.samples) {
-      let visible = false
-      if (s.userId === currentUserId) visible = true
-      else {
-          const owner = store.users.find(u => u.id === s.userId)
-          if (owner?.role === 'admin' && s.visibility === 'public') visible = true
-          else if (owner?.role === 'user' && owner.collectionVisibility === 'public' && s.isRefined) visible = true
-      }
-
-      if (visible) chars.add(s.char)
+    let visible = false
+    if (s.userId === currentUserId) visible = true
+    else {
+      const owner = store.users.find(u => u.id === s.userId)
+      if (owner?.role === 'admin' && s.visibility === 'public') visible = true
+      else if (owner?.role === 'user' && owner.collectionVisibility === 'public' && s.isRefined) visible = true
+    }
+    if (visible) chars.add(s.char)
   }
 
   return Array.from(chars)
 }
 
-// 获取所有已收集的字及其最新样本
 export async function getCollectedSamplesMap(): Promise<Record<string, CharacterSample>> {
   await loadFromFile()
   const map: Record<string, CharacterSample> = {}
   const currentUserId = currentUser.value?.id
 
-  // Only show my own samples, regardless of admin status or public visibility of others
   const visibleSamples = store.samples.filter(s => s.userId === currentUserId)
 
-  // Sort by score ascending (so last one overwrites)
   visibleSamples.sort((a, b) => {
     const scoreA = a.score || 0
     const scoreB = b.score || 0
@@ -585,17 +634,12 @@ export async function getCollectedSamplesMap(): Promise<Record<string, Character
 export async function getSamplesForWork(work: Work): Promise<CharacterSample[]> {
   await loadFromFile()
   const sampleIds = new Set(Object.values(work.charStyles))
-
-  // Also include samples for title and author from the work's author
-  // We filter out whitespace to avoid unnecessary checks
   const extraChars = new Set((work.title + (work.author || '')).split('').filter(c => c.trim()))
 
-  // Return samples that match the IDs OR are needed for title/author, regardless of visibility
-  // Because they are part of a visible work
   return store.samples.filter(s => {
-      if (sampleIds.has(s.id)) return true
-      if (extraChars.has(s.char) && s.userId === work.userId) return true
-      return false
+    if (sampleIds.has(s.id)) return true
+    if (extraChars.has(s.char) && s.userId === work.userId) return true
+    return false
   })
 }
 
@@ -603,7 +647,6 @@ export async function getWorkStats(works: Work[]): Promise<Record<string, number
   await loadFromFile()
   const stats: Record<string, number> = {}
 
-  // Build lookup
   const userCharSet = new Set<string>()
   for (const s of store.samples) {
     userCharSet.add(`${s.userId}_${s.char}`)
@@ -642,7 +685,6 @@ export async function getCollectedStatsMap(): Promise<Record<string, CharacterSt
       }
     }
 
-    // Update representative sample (prioritize high score)
     const currentBest = map[s.char].sample
     const scoreS = s.score || 0
     const scoreBest = currentBest.score || 0
@@ -655,7 +697,6 @@ export async function getCollectedStatsMap(): Promise<Record<string, CharacterSt
       }
     }
 
-    // Update counts
     map[s.char].totalCount++
     if (s.isAdjusted) {
       map[s.char].adjustedCount++
@@ -681,92 +722,69 @@ export async function getUnrefinedChars(): Promise<string[]> {
     }
   }
 
-  // Return chars where adjusted < total (has unadjusted samples)
   return Object.keys(charStatus).filter(char => {
-      const status = charStatus[char]
-      return status.adjusted < status.total
+    const status = charStatus[char]
+    return status.adjusted < status.total
   })
 }
 
-// 作品相关操作
+// =============================================
+// Works
+// =============================================
+
 export async function saveWork(work: Work) {
   if (!currentUser.value) throw new Error('Must be logged in')
 
   work.updatedAt = Date.now()
 
-  // Determine status logic
   if (currentUser.value.role === 'admin') {
-     // Admin can publish directly
-     if (work.visibility === 'public') {
-        work.status = 'published'
-     }
+    if (work.visibility === 'public') {
+      work.status = 'published'
+    }
   } else {
-     // Normal user
-     if (work.visibility === 'public') {
-        // If it's already published (approved), keep it published (unless we want to re-approve on edit?)
-        // Requirement: "Once public, only admin can modify or delete".
-        // So user shouldn't be able to edit a published public work.
-        // But if it's a new submission or pending:
-        if (work.status !== 'published') {
-            work.status = 'pending'
-        }
-     } else {
-        // Private works are always published (active)
-        work.status = 'published'
-     }
+    if (work.visibility === 'public') {
+      if (work.status !== 'published') {
+        work.status = 'pending'
+      }
+    } else {
+      work.status = 'published'
+    }
   }
 
   const index = store.works.findIndex(w => w.id === work.id)
 
   if (index >= 0) {
-    // Update existing
     const existingWork = store.works[index]
 
     if (currentUser.value.role === 'admin') {
-       // Admin can edit any public work or own work
-       if (existingWork.visibility !== 'public' && existingWork.userId !== currentUser.value.id) {
-          throw new Error('Admin can only manage public data or own data')
-       }
-       store.works[index] = work
+      if (existingWork.visibility !== 'public' && existingWork.userId !== currentUser.value.id) {
+        throw new Error('Admin can only manage public data or own data')
+      }
+      store.works[index] = work
     } else {
-       // Normal user can only edit own work
-       if (existingWork.userId !== currentUser.value.id) {
-         throw new Error('Permission denied')
-       }
+      if (existingWork.userId !== currentUser.value.id) {
+        throw new Error('Permission denied')
+      }
 
-       // Check if user is trying to edit a published public work
-       if (existingWork.visibility === 'public' && existingWork.status === 'published') {
-           // Requirement: "作品一旦公开，admin之外无权修改或删除"
-           // But maybe they can change it back to private?
-           // "Once public... admin only".
-           // Let's strictly forbid editing content if it's public & published.
-           // Unless they are changing it to private?
-           // If they change visibility to private, then it's no longer "public work".
-           if (work.visibility === 'public') {
-               // Allow owner to modify writing (styles/adjustments/refined status)
-               // But forbid modifying content/title/author
-               if (work.content !== existingWork.content ||
-                   work.title !== existingWork.title ||
-                   work.author !== existingWork.author) {
-                   throw new Error('已公开的作品无法修改内容，请联系管理员')
-               }
-               // If content is same, allow update (it's just writing update)
-           }
-       }
+      if (existingWork.visibility === 'public' && existingWork.status === 'published') {
+        if (work.visibility === 'public') {
+          if (work.content !== existingWork.content ||
+              work.title !== existingWork.title ||
+              work.author !== existingWork.author) {
+            throw new Error('已公开的作品无法修改内容，请联系管理员')
+          }
+        }
+      }
 
-       store.works[index] = work
+      store.works[index] = work
     }
   } else {
-    // Create new
     work.userId = currentUser.value.id
-    // work.visibility is already set by the caller (WorkEditor)
-    // work.status is already set by the logic above
     if (work.isRefined === undefined) work.isRefined = false
-
     if (!work.createdAt) work.createdAt = Date.now()
     store.works.push(work)
   }
-  await syncToFile()
+  await syncWorks()
 }
 
 export async function approveWork(workId: string, approved: boolean) {
@@ -777,7 +795,7 @@ export async function approveWork(workId: string, approved: boolean) {
 
   work.status = approved ? 'published' : 'rejected'
   work.updatedAt = Date.now()
-  await syncToFile()
+  await syncWorks()
 }
 
 export async function getWorks(): Promise<Work[]> {
@@ -786,48 +804,29 @@ export async function getWorks(): Promise<Work[]> {
 
   return [...store.works]
     .filter(w => {
-      // 1. Own works are visible to the user
       if (w.userId === currentUserId) return true
-
-      // 2. Public works (Templates)
-      // Requirement: "审核通过后，该作品公开，所有用户可见"
       if (w.visibility === 'public' && w.status === 'published') return true
-
-      // 3. Other Users' Refined Instances (Writing Visibility)
-      // Requirement: "已精修且处于公开状态的书写，所有普通账户和游客可见"
       if (w.visibility === 'private' && w.isRefined) {
-          const owner = store.users.find(u => u.id === w.userId)
-          if (owner && owner.collectionVisibility === 'public') {
-              return true
-          }
+        const owner = store.users.find(u => u.id === w.userId)
+        if (owner && owner.collectionVisibility === 'public') {
+          return true
+        }
       }
-
-      // 4. Admin sees pending works
       if (isAdmin) return true
-
       return false
     })
-    .sort((a, b) => (b.score || 0) - (a.score || 0)) // Sort by score
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
 }
 
 export async function getRelatedPublicWorks(title: string, excludeId?: string): Promise<Work[]> {
   await loadFromFile()
   const currentUserId = currentUser.value?.id
 
-  // Get stats for completeness check
-  // const stats = await getWorkStats(store.works)
-
   return store.works.filter(w => {
     if (w.id === excludeId) return false
     if (w.title.trim() !== title.trim()) return false
     if (w.visibility !== 'public') return false
-    if (w.userId === currentUserId) return false // Exclude my own works (they are in My Works)
-
-    // Check completeness (ignore punctuation)
-    // Only count Chinese characters, letters, and numbers
-    // const validChars = w.content.split('').filter(c => /[a-zA-Z0-9\u4e00-\u9fa5]/.test(c)).length
-    // const writtenCount = stats[w.id] || 0
-    // return writtenCount >= validChars && validChars > 0
+    if (w.userId === currentUserId) return false
     return true
   }).sort((a, b) => (b.score || 0) - (a.score || 0))
 }
@@ -851,28 +850,24 @@ export async function deleteWork(id: string) {
   if (!work) return
 
   if (currentUser.value?.role === 'admin') {
-    // Admin can delete anything, but let's stick to the rule: admin manages public data
-    // Actually admin should be able to delete any public work.
-    // If admin deletes, it's gone for good.
     store.works = store.works.filter(w => w.id !== id)
   } else {
     if (work.userId !== currentUser.value?.id) {
       throw new Error('Permission denied')
     }
-
-    // Ordinary users can only delete private works or non-published public works (pending/rejected)
     if (work.visibility === 'public' && work.status === 'published') {
       throw new Error('已公开的作品无法删除')
     }
-
-    // Private works are permanently deleted
     store.works = store.works.filter(w => w.id !== id)
   }
 
-  await syncToFile()
+  await syncWorks()
 }
 
-// 删除样本
+// =============================================
+// Delete sample
+// =============================================
+
 export async function deleteSample(id: string) {
   const sample = store.samples.find(s => s.id === id)
   if (!sample) return
@@ -888,8 +883,12 @@ export async function deleteSample(id: string) {
   }
 
   store.samples = store.samples.filter(s => s.id !== id)
-  await syncToFile()
+  await syncSamples()
 }
+
+// =============================================
+// Collect / Uncollect works
+// =============================================
 
 export async function collectWork(workId: string) {
   if (!currentUser.value) throw new Error('Must be logged in')
@@ -897,24 +896,19 @@ export async function collectWork(workId: string) {
   const work = store.works.find(w => w.id === workId)
   if (!work) throw new Error('Work not found')
 
-  // Check if already collected (by checking if I have a work with same title/content? Or just allow duplicates?)
-  // The prompt says "add public works to own collection... unrefined state".
-  // Let's allow duplicates for now, or check if we already have a work with same title/content.
-  // But user might want multiple versions.
-
   const newWork: Work = {
     id: crypto.randomUUID(),
     userId: currentUser.value.id,
-    visibility: 'private', // Always private initially
-    status: 'published', // Private works are published/active
+    visibility: 'private',
+    status: 'published',
     title: work.title,
     author: work.author,
     content: work.content,
-    charStyles: {}, // Start fresh or copy? "Unrefined" implies we need to select handwriting.
+    charStyles: {},
     charAdjustments: {},
     layout: work.layout,
     gridType: work.gridType,
-    isRefined: false, // Unrefined state
+    isRefined: false,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     originWorkId: work.id
@@ -927,20 +921,24 @@ export async function collectWork(workId: string) {
     currentUser.value.collectedWorkIds.push(workId)
   }
 
-  await syncToFile()
+  await syncWorks()
+  await syncUserUpdate(currentUser.value.id, { collectedWorkIds: currentUser.value.collectedWorkIds })
 }
 
 export async function uncollectWork(workId: string) {
-  // This is now just deleting my work
   await deleteWork(workId)
 }
+
+// =============================================
+// Clear all data
+// =============================================
 
 export async function clearAllData() {
   store.samples = []
   store.works = []
   store.settings = null
 
-  await syncToFile()
-  // Re-init settings to defaults
+  await syncSamples()
+  await syncWorks()
   await initSettings()
 }

@@ -145,6 +145,12 @@ Desktop.ini
 dist-ssr
 *.local
 
+# Vercel
+.vercel
+
+# User data (contains passwords, use seed script to upload to Vercel Blob)
+data/
+
 # Auto-generated types
 components.d.ts
 auto-imports.d.ts

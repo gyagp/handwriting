@@ -14,7 +14,7 @@ export type WorkStatus = 'draft' | 'pending' | 'published' | 'rejected'
 export interface User {
   id: string
   username: string
-  password?: string // Simple password for now
+  password?: string // Only used locally for password reset flow; never stored on client from server
   role: Role
   createdAt: number
   collectedWorkIds?: string[] // IDs of public works collected by this user
@@ -80,7 +80,7 @@ export interface AppSettings {
 
 // 书法作品
 export interface Work {
-  id: string (Deprecated)
+  id: string // Deprecated
   status: WorkStatus        // 审核状态
   title: string
   author?: string           // 作者
@@ -91,8 +91,6 @@ export interface Work {
   gridType?: GridType       // 格子类型
   score?: number            // 公众评分平均分 0-100
   isRefined?: boolean       // 是否已精修
-  gridType?: GridType       // 格子类型
-  score?: number            // 公众评分平均分 0-100
   createdAt: number
   updatedAt: number
   userId: string            // 用户ID

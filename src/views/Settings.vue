@@ -134,6 +134,7 @@ const resetPassword = (user: User) => {
     showCancelButton: true
   }).then(async (action) => {
     if (action === 'confirm') {
+      // Use the password field as a signal to updateUser to reset via server
       user.password = '123456'
       await updateUser(user)
       showToast('密码已重置')
