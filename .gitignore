@@ -154,3 +154,4 @@ data/
 # Auto-generated types
 components.d.ts
 auto-imports.d.ts
+.env*.local

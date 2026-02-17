@@ -5,9 +5,10 @@
       "username": "gyagp",
       "createdAt": 1767104963316,
       "role": "user",
-      "password": "gy12345",
       "collectedWorkIds": [],
-      "collectionVisibility": "public"
+      "collectionVisibility": "public",
+      "passwordHash": "3e76e699c7bfbc0c468cd769b711cdac2597f6caa24471fb7663a154abc68581f9b918de47ecf4231978e19e390db2ab555b871ac1518b6db0383f50ed4ae4d5",
+      "passwordSalt": "264f16bf549c786a47919af72a669ff7"
     },
     {
       "id": "4af295ac-ffb1-49b2-8345-bb5c2da2e4ed",

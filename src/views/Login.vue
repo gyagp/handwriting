@@ -8,6 +8,7 @@
           label="用户名"
           placeholder="4-30字符，汉字算2字符"
           :rules="[{ required: true, message: '请填写用户名' }]"
+          @keyup.enter="handleLogin"
         />
         <van-field
           v-model="password"
@@ -15,6 +16,7 @@
           label="密码"
           placeholder="7-16位，不能是纯数字"
           :rules="[{ required: true, message: '请填写密码' }]"
+          @keyup.enter="handleLogin"
         />
         <div class="actions">
           <van-button type="primary" block @click="handleLogin" :loading="loading">登录</van-button>

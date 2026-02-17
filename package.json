@@ -7,11 +7,14 @@
     "dev": "vite",
     "build": "vue-tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest",
+    "vercel:dev": "npx vercel dev",
+    "vercel:build": "npx vercel build"
   },
   "dependencies": {
     "@vant/use": "^1.6.0",
     "@vercel/blob": "^0.27.0",
+    "package.json": "^2.0.1",
     "pako": "^2.1.0",
     "pinia": "^2.1.7",
     "potrace": "^2.1.8",
@@ -20,9 +23,9 @@
     "vue-router": "^4.2.5"
   },
   "devDependencies": {
-    "@vercel/node": "^5.0.0",
     "@types/pako": "^2.0.3",
     "@vant/auto-import-resolver": "^1.2.1",
+    "@vercel/node": "^5.0.0",
     "@vitejs/plugin-vue": "^5.0.0",
     "typescript": "^5.3.0",
     "unplugin-vue-components": "^0.26.0",

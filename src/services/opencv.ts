@@ -1,6 +1,7 @@
 // OpenCV加载和封装服务
 
-const OPENCV_URL = 'https://docs.opencv.org/4.8.0/opencv.js'
+// Use unpkg CDN for better reliability
+const OPENCV_URL = 'https://unpkg.com/@techstark/opencv-js@4.8.0-release.1/dist/opencv.js'
 
 let cvLoaded = false
 let cvLoadingPromise: Promise<void> | null = null
@@ -16,17 +17,31 @@ export async function loadOpenCV(): Promise<void> {
     script.onload = () => {
       // OpenCV.js 加载后会初始化 cv 对象
       // 通常需要等待 cv.onRuntimeInitialized
-      if ((window as any).cv.getBuildInformation) {
+      if ((window as any).cv && (window as any).cv.getBuildInformation) {
         cvLoaded = true
         resolve()
-      } else {
+      } else if ((window as any).cv) {
         (window as any).cv['onRuntimeInitialized'] = () => {
           cvLoaded = true
           resolve()
         }
+      } else {
+        // cv object not available yet, wait for it
+        setTimeout(() => {
+          if ((window as any).cv) {
+            (window as any).cv['onRuntimeInitialized'] = () => {
+              cvLoaded = true
+              resolve()
+            }
+          } else {
+            cvLoadingPromise = null
+            reject(new Error('OpenCV object not initialized'))
+          }
+        }, 100)
       }
     }
-    script.onerror = () => {
+    script.onerror = (error) => {
+      console.error('Failed to load OpenCV.js from:', OPENCV_URL, error)
       cvLoadingPromise = null
       reject(new Error('Failed to load OpenCV.js'))
     }
