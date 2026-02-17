@@ -4,6 +4,7 @@
 
     <van-cell-group title="用户账户">
       <van-cell title="当前用户" :value="currentUser?.username || '未登录'" :label="currentUser?.role === 'admin' ? '管理员' : (currentUser?.role === 'guest' ? '游客' : '普通用户')" />
+      <van-cell title="修改密码" is-link @click="showChangePasswordDialog = true" v-if="currentUser && currentUser.role !== 'guest'" />
       <van-cell title="切换用户" is-link @click="showLoginDialog = true" />
       <van-cell title="退出登录" is-link @click="handleLogout" v-if="currentUser" />
     </van-cell-group>
@@ -57,7 +58,10 @@
 
     <van-popup v-model:show="showUserList" position="bottom" :style="{ height: '50%' }" round closeable>
       <div style="padding: 16px;">
-        <h3>用户列表</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <h3>用户列表</h3>
+          <van-button size="small" type="primary" @click="showCreateUserDialog = true">添加用户</van-button>
+        </div>
         <van-list>
           <van-cell v-for="user in userList" :key="user.id" :title="user.username" :label="user.role">
              <template #right-icon>
@@ -67,12 +71,31 @@
         </van-list>
       </div>
     </van-popup>
+
+    <van-dialog v-model:show="showChangePasswordDialog" title="修改密码" show-cancel-button @confirm="handleChangePassword">
+      <van-field v-model="passwordForm.oldPassword" type="password" label="原密码" placeholder="请输入原密码" />
+      <van-field v-model="passwordForm.newPassword" type="password" label="新密码" placeholder="7-16位，不能是纯数字" />
+      <van-field v-model="passwordForm.confirmPassword" type="password" label="确认密码" placeholder="请再次输入新密码" />
+    </van-dialog>
+
+    <van-dialog v-model:show="showCreateUserDialog" title="创建新用户" show-cancel-button @confirm="handleCreateUser">
+      <van-field v-model="createUserForm.username" label="用户名" placeholder="4-30字符，汉字算2字符" />
+      <van-field v-model="createUserForm.password" type="password" label="密码" placeholder="7-16位，不能是纯数字" />
+      <van-field label="角色">
+        <template #input>
+          <van-radio-group v-model="createUserForm.role" direction="horizontal">
+            <van-radio name="user">普通用户</van-radio>
+            <van-radio name="admin">管理员</van-radio>
+          </van-radio-group>
+        </template>
+      </van-field>
+    </van-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, watch, reactive } from 'vue'
-import { getSettings, saveSettings, clearAllData, currentUser, loginUser, registerUser, getAllUsers, updateUser, logoutUser, setAllVisibility } from '@/services/db'
+import { getSettings, saveSettings, clearAllData, currentUser, loginUser, registerUser, getAllUsers, updateUser, logoutUser, setAllVisibility, changePassword, createUser } from '@/services/db'
 import type { AppSettings, User } from '@/types'
 import { showDialog, showToast } from 'vant'
 import { useRouter } from 'vue-router'
@@ -95,9 +118,23 @@ const handleVisibilityChange = async (val: 'public' | 'private') => {
 }
 
 const showLoginDialog = ref(false)
+const showChangePasswordDialog = ref(false)
+const showCreateUserDialog = ref(false)
 const loginForm = reactive({
   username: '',
   password: ''
+})
+
+const passwordForm = reactive({
+  oldPassword: '',
+  newPassword: '',
+  confirmPassword: ''
+})
+
+const createUserForm = reactive({
+  username: '',
+  password: '',
+  role: 'user' as 'user' | 'admin'
 })
 
 const showUserList = ref(false)
@@ -170,6 +207,53 @@ const handleRegister = async () => {
     showLoginDialog.value = false
   } catch (e: any) {
     showToast('注册失败: ' + e.message)
+  }
+}
+
+const handleChangePassword = async () => {
+  if (!passwordForm.oldPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+    showToast('请填写所有字段')
+    return
+  }
+
+  if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+    showToast('两次输入的新密码不一致')
+    return
+  }
+
+  try {
+    await changePassword(passwordForm.oldPassword, passwordForm.newPassword)
+    showToast('密码修改成功')
+    showChangePasswordDialog.value = false
+    // Clear form
+    passwordForm.oldPassword = ''
+    passwordForm.newPassword = ''
+    passwordForm.confirmPassword = ''
+  } catch (e: any) {
+    showToast(e.message || '修改密码失败')
+    throw e // Prevent dialog from closing
+  }
+}
+
+const handleCreateUser = async () => {
+  if (!createUserForm.username || !createUserForm.password) {
+    showToast('请填写用户名和密码')
+    return
+  }
+
+  try {
+    await createUser(createUserForm.username, createUserForm.password, createUserForm.role)
+    showToast('用户创建成功')
+    showCreateUserDialog.value = false
+    // Clear form
+    createUserForm.username = ''
+    createUserForm.password = ''
+    createUserForm.role = 'user'
+    // Reload user list
+    await loadUsers()
+  } catch (e: any) {
+    showToast(e.message || '创建用户失败')
+    throw e // Prevent dialog from closing
   }
 }
 

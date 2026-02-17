@@ -142,6 +142,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ])
 
     return res.status(200).json({ user: sanitizeUser(newUser) })
+
+  } else if (action === 'changePassword') {
+    const { userId, oldPassword, newPassword } = req.body
+    if (!userId || !oldPassword || !newPassword) {
+      return res.status(400).json({ error: 'Missing required fields' })
+    }
+
+    const user = users.find((u: any) => u.id === userId)
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' })
+    }
+
+    // Verify old password
+    if (user.passwordHash) {
+      if (!verifyPassword(oldPassword, user.passwordHash, user.passwordSalt)) {
+        return res.status(401).json({ error: '原密码错误' })
+      }
+    } else if (user.password) {
+      if (user.password !== oldPassword) {
+        return res.status(401).json({ error: '原密码错误' })
+      }
+    }
+
+    // Validate new password
+    if (newPassword.length < 7 || newPassword.length > 16) {
+      return res.status(400).json({ error: '密码长度必须是7-16位' })
+    }
+    if (/^\d+$/.test(newPassword)) {
+      return res.status(400).json({ error: '密码不能是纯数字' })
+    }
+
+    // Set new password
+    const { hash, salt } = hashPassword(newPassword)
+    user.passwordHash = hash
+    user.passwordSalt = salt
+    delete user.password
+
+    systemData.users = users
+    await writeBlobJson(systemPath, systemData)
+
+    return res.status(200).json({ success: true })
   }
 
   return res.status(400).json({ error: 'Invalid action' })

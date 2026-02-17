@@ -298,6 +298,53 @@ export async function updateUser(user: User) {
   await syncUserUpdate(user.id, { role: user.role })
 }
 
+export async function changePassword(oldPassword: string, newPassword: string) {
+  if (!currentUser.value || currentUser.value.role === 'guest') {
+    throw new Error('Must be logged in as a regular user')
+  }
+
+  const res = await fetch('/api/auth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'changePassword',
+      userId: currentUser.value.id,
+      oldPassword,
+      newPassword
+    })
+  })
+
+  if (!res.ok) {
+    let errorMsg = '修改密码失败'
+    try {
+      const data = await res.json()
+      errorMsg = data.error || errorMsg
+    } catch {}
+    throw new Error(errorMsg)
+  }
+
+  return true
+}
+
+export async function createUser(username: string, password: string, role: 'user' | 'admin' = 'user'): Promise<User> {
+  if (currentUser.value?.role !== 'admin') {
+    throw new Error('Only administrators can create users')
+  }
+
+  // Use registerUser to create the user
+  const user = await registerUser(username, password)
+  
+  // If admin wants to create an admin user, update the role
+  if (role === 'admin') {
+    await updateUser({ ...user, role: 'admin' })
+    user.role = 'admin'
+    const idx = store.users.findIndex(u => u.id === user.id)
+    if (idx >= 0) store.users[idx].role = 'admin'
+  }
+
+  return user
+}
+
 export function getUsername(userId: string): string {
   const user = store.users.find(u => u.id === userId)
   if (user) return user.username
