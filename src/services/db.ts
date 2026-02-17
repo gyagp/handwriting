@@ -735,20 +735,58 @@ export async function getSamplesForWork(work: Work): Promise<CharacterSample[]> 
 export async function getWorkStats(works: Work[]): Promise<Record<string, number>> {
   const stats: Record<string, number> = {}
 
+  // Build a map of userId_char for quick lookup
   const userCharSet = new Set<string>()
+  // Build a map of sampleId -> sample for checking specific samples
+  const sampleMap = new Map<string, CharacterSample>()
   for (const s of store.samples) {
     userCharSet.add(`${s.userId}_${s.char}`)
+    sampleMap.set(s.id, s)
   }
 
   for (const work of works) {
     let count = 0
-    const fullText = (work.title || '') + (work.author || '') + work.content
-    for (const char of fullText) {
+
+    // Count title characters
+    const title = work.title || ''
+    for (const char of title) {
       if (/\s/.test(char)) continue
       if (userCharSet.has(`${work.userId}_${char}`)) {
         count++
       }
     }
+
+    // Count author characters
+    const author = work.author || ''
+    for (const char of author) {
+      if (/\s/.test(char)) continue
+      if (userCharSet.has(`${work.userId}_${char}`)) {
+        count++
+      }
+    }
+
+    // Count content characters - need to check charStyles
+    const content = work.content || ''
+    const contentChars = content.split('').filter(c => !(/\s/.test(c)))
+    for (let i = 0; i < contentChars.length; i++) {
+      const char = contentChars[i]
+
+      // Check if a specific style is selected for this position
+      const selectedSampleId = work.charStyles?.[i]
+      if (selectedSampleId) {
+        // If a specific sample is selected, check if it belongs to the user
+        const sample = sampleMap.get(selectedSampleId)
+        if (sample && sample.userId === work.userId) {
+          count++
+        }
+      } else {
+        // No specific sample selected, check if user has any sample for this char
+        if (userCharSet.has(`${work.userId}_${char}`)) {
+          count++
+        }
+      }
+    }
+
     stats[work.id] = count
   }
   return stats

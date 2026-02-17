@@ -53,9 +53,9 @@
               <span class="stats" v-if="work.userId === currentUser?.id">总字数: {{ getWorkTotalCount(work) }} / 自写: {{ workStats[work.id] || 0 }}</span>
               <span class="author-tag" v-if="work.userId !== currentUser?.id">上传人: {{ getUsername(work.userId) }}</span>
 
-              <!-- 状态标签 -->
-              <van-tag v-if="work.isRefined" type="success" style="margin-left: 5px">已精修</van-tag>
-              <van-tag v-else type="default" style="margin-left: 5px">未精修</van-tag>
+              <!-- 状态标签 - 只对自己的作品显示精修状态 -->
+              <van-tag v-if="work.userId === currentUser?.id && work.isRefined" type="success" style="margin-left: 5px">已精修</van-tag>
+              <van-tag v-else-if="work.userId === currentUser?.id && !work.isRefined" type="default" style="margin-left: 5px">未精修</van-tag>
 
               <!-- 可见性标签 -->
               <van-tag v-if="work.status === 'pending'" type="warning" style="margin-left: 5px">审核中</van-tag>
